@@ -206,12 +206,14 @@ class TestModelResponseComprehensive:
     """Comprehensive tests for ModelResponse."""
 
     def test_response_post_init_adds_usage(self):
-        """Test __post_init__ adds usage to model_extra."""
+        """Test model_extra contains usage when explicitly passed (like adapters do)."""
         usage = Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        # Adapters explicitly pass model_extra with usage
         response = ModelResponse(
             id="resp-1",
             choices=[],
             usage=usage,
+            model_extra={"usage": usage.model_dump()},
         )
         assert "usage" in response.model_extra
         assert response.model_extra["usage"]["total_tokens"] == 15

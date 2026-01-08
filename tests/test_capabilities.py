@@ -163,8 +163,11 @@ class TestSupportsStructuredOutput:
         assert supports_structured_output("gpt-4o-mini") is True
 
     def test_claude_supports_structured(self):
-        """Test Claude supports structured output."""
-        assert supports_structured_output("claude-3-5-sonnet-20241022") is True
+        """Test Claude 4+ supports structured output (native JSON mode)."""
+        # Claude 4+ supports native response_format for structured output
+        assert supports_structured_output("claude-4-5-sonnet-latest") is True
+        # Claude 3.x does NOT support native structured output
+        assert supports_structured_output("claude-3-5-sonnet-20241022") is False
 
     def test_gemini_supports_structured(self):
         """Test Gemini supports structured output."""

@@ -255,12 +255,12 @@ class TestSSEParserBoundedBuffering:
         # Send first event
         events = list(parser.feed("data: first\n\n"))
         assert len(events) == 1
-        assert parser._buffer == ""  # Buffer should be empty
+        assert len(parser._buffer) == 0  # Buffer should be empty (bytearray)
 
         # Send second event
         events = list(parser.feed("data: second\n\n"))
         assert len(events) == 1
-        assert parser._buffer == ""
+        assert len(parser._buffer) == 0
 
     def test_current_data_cleared(self):
         """Test that _current_data is cleared after event dispatch."""

@@ -1,17 +1,16 @@
 """
 Tests for arcllm.http.client module.
 
-Tests the synchronous HTTP client with mocked network calls.
+Tests the synchronous HTTP client using httpx.
 """
 
 from __future__ import annotations
 
-import http.client
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from arcllm.http.client import ConnectionPool, HTTPClient, HTTPResponse
+from arcllm.http.client import HTTPClient, HTTPResponse
 
 
 class TestHTTPResponse:
@@ -28,7 +27,7 @@ class TestHTTPResponse:
         assert response.headers["content-type"] == "application/json"
 
     def test_json_method(self):
-        """Test JSON parsing."""
+        """Test JSON parsing with orjson."""
         response = HTTPResponse(
             status_code=200,
             headers={},
@@ -57,158 +56,164 @@ class TestHTTPResponse:
         assert response.request_id == "req-123"
 
 
-class TestConnectionPool:
-    """Tests for ConnectionPool."""
-
-    def test_create_pool(self):
-        """Test creating a connection pool."""
-        pool = ConnectionPool(
-            host="api.example.com",
-            port=443,
-            is_https=True,
-        )
-        assert pool.host == "api.example.com"
-        assert pool.port == 443
-        assert pool.is_https is True
-        assert len(pool.connections) == 0
-
-    def test_get_connection_creates_new(self):
-        """Test getting a connection when pool is empty."""
-        pool = ConnectionPool(
-            host="api.example.com",
-            port=443,
-            is_https=True,
-        )
-        conn = pool.get_connection(timeout=30.0)
-        assert conn is not None
-
-    def test_return_connection(self):
-        """Test returning a connection to the pool."""
-        pool = ConnectionPool(
-            host="api.example.com",
-            port=443,
-            is_https=True,
-            max_connections=5,
-        )
-        mock_conn = MagicMock(spec=http.client.HTTPSConnection)
-        pool.return_connection(mock_conn)
-        assert len(pool.connections) == 1
-
-    def test_max_connections_respected(self):
-        """Test that max_connections limit is respected."""
-        pool = ConnectionPool(
-            host="api.example.com",
-            port=443,
-            is_https=True,
-            max_connections=2,
-        )
-        # Add more connections than max
-        for _ in range(5):
-            mock_conn = MagicMock(spec=http.client.HTTPSConnection)
-            pool.return_connection(mock_conn)
-
-        assert len(pool.connections) == 2
-
-    def test_close_all(self):
-        """Test closing all connections."""
-        pool = ConnectionPool(
-            host="api.example.com",
-            port=443,
-            is_https=True,
-        )
-        mock_conn1 = MagicMock(spec=http.client.HTTPSConnection)
-        mock_conn2 = MagicMock(spec=http.client.HTTPSConnection)
-        pool.return_connection(mock_conn1)
-        pool.return_connection(mock_conn2)
-
-        pool.close_all()
-
-        assert len(pool.connections) == 0
-        mock_conn1.close.assert_called_once()
-        mock_conn2.close.assert_called_once()
-
-
 class TestHTTPClient:
-    """Tests for HTTPClient."""
+    """Tests for HTTPClient using httpx."""
 
-    def test_create_client(self):
-        """Test creating an HTTP client."""
+    def test_create_client_default(self):
+        """Test creating an HTTP client with defaults."""
+        client = HTTPClient()
+        assert client._timeout == 60.0
+        assert client._max_retries == 3
+        client.close()
+
+    def test_create_client_custom(self):
+        """Test creating an HTTP client with custom settings."""
         client = HTTPClient(
             timeout=30.0,
             connect_timeout=5.0,
-            max_retries=3,
+            max_retries=5,
+            http2=False,
         )
         assert client._timeout == 30.0
-        assert client._connect_timeout == 5.0
-        assert client._max_retries == 3
-
-    def test_close_client(self):
-        """Test closing the client."""
-        client = HTTPClient()
-        # Add a mock pool
-        client._pools["https://api.example.com:443"] = MagicMock()
+        assert client._max_retries == 5
         client.close()
-        assert len(client._pools) == 0
 
     def test_context_manager(self):
         """Test using client as context manager."""
         with HTTPClient() as client:
             assert client is not None
-        # After exit, pools should be cleared
+            assert client._client is not None
 
-    def test_decompress_gzip(self):
-        """Test gzip decompression."""
-        import gzip
-
+    def test_close_client(self):
+        """Test closing the client."""
         client = HTTPClient()
-        original = b"Hello, World!"
-        compressed = gzip.compress(original)
-        result = client._decompress(compressed, "gzip")
-        assert result == original
+        client.close()
+        # Client should be closed but not raise error
+        assert True
 
-    def test_decompress_deflate(self):
-        """Test deflate decompression."""
-        import zlib
+    @patch("httpx.Client.request")
+    def test_request_success(self, mock_request):
+        """Test successful request."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json", "x-request-id": "req-123"}
+        mock_response.content = b'{"result": "ok"}'
+        mock_request.return_value = mock_response
 
-        client = HTTPClient()
-        original = b"Hello, World!"
-        compressed = zlib.compress(original)
-        result = client._decompress(compressed, "deflate")
-        assert result == original
+        with HTTPClient() as client:
+            response = client.request("POST", "https://api.example.com/v1/test")
 
-    def test_decompress_none(self):
-        """Test no decompression when encoding is None."""
-        client = HTTPClient()
-        original = b"Hello, World!"
-        result = client._decompress(original, None)
-        assert result == original
+        assert isinstance(response, HTTPResponse)
+        assert response.status_code == 200
+        assert response.request_id == "req-123"
+        assert response.json() == {"result": "ok"}
+
+    @patch("httpx.Client.request")
+    def test_request_with_body(self, mock_request):
+        """Test request with body."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b'{"status": "ok"}'
+        mock_request.return_value = mock_response
+
+        with HTTPClient() as client:
+            client.request(
+                "POST",
+                "https://api.example.com/v1/test",
+                body=b'{"key": "value"}',
+                headers={"Content-Type": "application/json"},
+            )
+
+        mock_request.assert_called_once()
+        call_kwargs = mock_request.call_args
+        assert call_kwargs[1]["content"] == b'{"key": "value"}'
+
+    @patch("httpx.Client.post")
+    def test_post_method(self, mock_post):
+        """Test POST convenience method."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b'{"ok": true}'
+
+        # The post method uses request internally, so we need to patch request
+        with patch("httpx.Client.request", return_value=mock_response):
+            with HTTPClient() as client:
+                response = client.post(
+                    "https://api.example.com/v1/test",
+                    json_data={"model": "gpt-4"},
+                )
+
+        assert response.status_code == 200
+
+    @patch("httpx.Client.request")
+    def test_get_method(self, mock_request):
+        """Test GET convenience method."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b'{"models": []}'
+        mock_request.return_value = mock_response
+
+        with HTTPClient() as client:
+            response = client.get("https://api.example.com/v1/models")
+
+        assert response.status_code == 200
+        mock_request.assert_called_with(
+            "GET",
+            "https://api.example.com/v1/models",
+            headers=None,
+            content=None,
+            timeout=60.0,
+        )
 
 
-class TestHTTPClientIntegration:
-    """Integration-style tests for HTTPClient with mocked connections."""
+class TestHTTPClientErrors:
+    """Tests for error handling in HTTPClient."""
 
-    @pytest.fixture
-    def mock_http_client(self):
-        """Create a client with mocked connection."""
-        client = HTTPClient()
-        return client
+    def test_timeout_error(self):
+        """Test timeout error handling."""
+        import httpx
+        from arcllm.exceptions import TimeoutError
 
-    def test_get_pool(self, mock_http_client):
-        """Test getting connection pool for URL."""
-        pool, path = mock_http_client._get_pool("https://api.example.com/v1/chat/completions")
-        assert pool.host == "api.example.com"
-        assert pool.port == 443
-        assert pool.is_https is True
-        assert path == "/v1/chat/completions"
+        with patch("httpx.Client.request") as mock_request:
+            mock_request.side_effect = httpx.TimeoutException("Timed out")
 
-    def test_get_pool_with_query(self, mock_http_client):
-        """Test getting pool with query parameters."""
-        _pool, path = mock_http_client._get_pool("https://api.example.com/v1?key=value")
-        assert path == "/v1?key=value"
+            with HTTPClient(max_retries=1) as client:
+                with pytest.raises(TimeoutError):
+                    client.request("GET", "https://api.example.com/slow")
 
-    def test_get_pool_http(self, mock_http_client):
-        """Test getting pool for HTTP URL."""
-        pool, _path = mock_http_client._get_pool("http://localhost:8080/api")
-        assert pool.host == "localhost"
-        assert pool.port == 8080
-        assert pool.is_https is False
+    def test_connection_error(self):
+        """Test connection error handling."""
+        import httpx
+        from arcllm.exceptions import ConnectionError
+
+        with patch("httpx.Client.request") as mock_request:
+            mock_request.side_effect = httpx.ConnectError("Connection refused")
+
+            with HTTPClient(max_retries=1) as client:
+                with pytest.raises(ConnectionError):
+                    client.request("GET", "https://api.example.com/down")
+
+    def test_retry_on_error(self):
+        """Test that retries work."""
+        import httpx
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.content = b'{"ok": true}'
+
+        with patch("httpx.Client.request") as mock_request:
+            # First call fails, second succeeds
+            mock_request.side_effect = [
+                httpx.ConnectError("Connection refused"),
+                mock_response,
+            ]
+
+            with HTTPClient(max_retries=2) as client:
+                response = client.request("GET", "https://api.example.com/flaky")
+
+            assert response.status_code == 200
+            assert mock_request.call_count == 2

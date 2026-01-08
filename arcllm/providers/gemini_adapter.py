@@ -9,14 +9,15 @@ Google's Gemini API uses a different format than OpenAI:
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Any
 
+import orjson
+
 from arcllm.exceptions import (
-    AuthenticationError,
     ArcLLMError,
+    AuthenticationError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
@@ -61,6 +62,13 @@ class GeminiAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self._api_base = config.api_base or "https://generativelanguage.googleapis.com/v1beta"
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build request headers (cached after first call)."""
+        headers = {"Content-Type": "application/json"}
+        if self.config.extra_headers:
+            headers.update(self.config.extra_headers)
+        return headers
 
     def _get_api_key(self, env_var: str = "GEMINI_API_KEY", param_key: str = "api_key") -> str:
         """Get API key, checking multiple env vars."""
@@ -110,7 +118,7 @@ class GeminiAdapter(BaseAdapter):
                             {
                                 "functionCall": {
                                     "name": func.get("name", ""),
-                                    "args": json.loads(func.get("arguments", "{}")),
+                                    "args": orjson.loads(func.get("arguments", "{}")),
                                 }
                             }
                         )
@@ -247,12 +255,12 @@ class GeminiAdapter(BaseAdapter):
         if stream:
             url += "&alt=sse"
 
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
             url=url,
-            headers={"Content-Type": "application/json"},
+            headers=self._get_headers(),
             body=body_bytes,
             timeout=self.config.timeout,
         )
@@ -260,8 +268,8 @@ class GeminiAdapter(BaseAdapter):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse Gemini generateContent response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse response JSON: {e}",
                 provider=self.provider_name,
@@ -272,6 +280,8 @@ class GeminiAdapter(BaseAdapter):
 
     def _build_model_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Build ModelResponse from Gemini response."""
+        # Cache timestamp once for this response
+        now = int(time.time())
         candidates = resp.get("candidates", [])
         choices: list[Choice] = []
 
@@ -279,12 +289,13 @@ class GeminiAdapter(BaseAdapter):
             content = candidate.get("content", {})
             parts = content.get("parts", [])
 
-            text_content = ""
+            # Use list + join for efficient string building
+            text_parts: list[str] = []
             tool_calls: list[ToolCall] = []
 
             for part in parts:
                 if "text" in part:
-                    text_content += part["text"]
+                    text_parts.append(part["text"])
                 elif "functionCall" in part:
                     fc = part["functionCall"]
                     tool_calls.append(
@@ -293,14 +304,15 @@ class GeminiAdapter(BaseAdapter):
                             type="function",
                             function=FunctionCall(
                                 name=fc.get("name", ""),
-                                arguments=json.dumps(fc.get("args", {})),
+                                arguments=orjson.dumps(fc.get("args", {})).decode(),
                             ),
                         )
                     )
 
+            text_content = "".join(text_parts) if text_parts else None
             message = Message(
                 role="assistant",
-                content=text_content if text_content else None,
+                content=text_content,
                 tool_calls=tool_calls if tool_calls else None,
             )
 
@@ -331,9 +343,9 @@ class GeminiAdapter(BaseAdapter):
         )
 
         return ModelResponse(
-            id=f"gemini-{int(time.time())}",
+            id=f"gemini-{now}",
             object="chat.completion",
-            created=int(time.time()),
+            created=now,
             model=model,
             choices=choices,
             usage=usage,
@@ -347,25 +359,28 @@ class GeminiAdapter(BaseAdapter):
             return None
 
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError:
+            event = orjson.loads(data)
+        except orjson.JSONDecodeError:
             return None
 
         candidates = event.get("candidates", [])
         if not candidates:
             return None
 
+        # Cache timestamp once for this event
+        now = int(time.time())
         choices: list[ChunkChoice] = []
         for i, candidate in enumerate(candidates):
             content = candidate.get("content", {})
             parts = content.get("parts", [])
 
-            text_content = ""
+            # Use list + join for efficient string building
+            text_parts: list[str] = []
             tool_call_deltas: list[dict[str, Any]] = []
 
             for part in parts:
                 if "text" in part:
-                    text_content += part["text"]
+                    text_parts.append(part["text"])
                 elif "functionCall" in part:
                     fc = part["functionCall"]
                     tool_call_deltas.append(
@@ -375,13 +390,14 @@ class GeminiAdapter(BaseAdapter):
                             "type": "function",
                             "function": {
                                 "name": fc.get("name", ""),
-                                "arguments": json.dumps(fc.get("args", {})),
+                                "arguments": orjson.dumps(fc.get("args", {})).decode(),
                             },
                         }
                     )
 
+            text_content = "".join(text_parts) if text_parts else None
             delta = ChunkDelta(
-                content=text_content if text_content else None,
+                content=text_content,
                 tool_calls=tool_call_deltas if tool_call_deltas else None,
             )
 
@@ -413,7 +429,7 @@ class GeminiAdapter(BaseAdapter):
             )
 
         return StreamChunk(
-            id=f"gemini-{int(time.time())}",
+            id=f"gemini-{now}",
             model=model,
             choices=choices,
             usage=usage,
@@ -427,50 +443,49 @@ class GeminiAdapter(BaseAdapter):
     ) -> ArcLLMError:
         """Parse Gemini error response."""
         try:
-            error_data = json.loads(data.decode("utf-8"))
+            error_data = orjson.loads(data)
             error = error_data.get("error", {})
             message = error.get("message", "Unknown error")
             error_status = error.get("status", "")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
             error_status = ""
 
-        if status_code == 401 or status_code == 403:
+        if status_code in {401, 403}:
             return AuthenticationError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 429:
+        if status_code == 429:
             return RateLimitError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 400:
+        if status_code == 400:
             return InvalidRequestError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 404:
+        if status_code == 404:
             return UnsupportedModelError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        else:
-            return ProviderAPIError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-                error_type=error_status,
-            )
+        return ProviderAPIError(
+            message,
+            provider=self.provider_name,
+            status_code=status_code,
+            request_id=request_id,
+            error_type=error_status,
+        )
 
     def build_embedding_request(
         self,
@@ -490,12 +505,12 @@ class GeminiAdapter(BaseAdapter):
         body = {"requests": requests}
         url = f"{self._api_base}/models/{model}:batchEmbedContents?key={api_key}"
 
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
             url=url,
-            headers={"Content-Type": "application/json"},
+            headers=self._get_headers(),
             body=body_bytes,
             timeout=self.config.timeout,
         )
@@ -503,8 +518,8 @@ class GeminiAdapter(BaseAdapter):
     def parse_embedding_response(self, data: bytes, model: str) -> EmbeddingResponse:
         """Parse Gemini embedding response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse embedding response: {e}",
                 provider=self.provider_name,

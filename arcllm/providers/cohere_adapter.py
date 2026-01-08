@@ -9,13 +9,14 @@ Cohere uses a different API format than OpenAI with:
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
+import orjson
+
 from arcllm.exceptions import (
-    AuthenticationError,
     ArcLLMError,
+    AuthenticationError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
@@ -64,7 +65,7 @@ class CohereAdapter(BaseAdapter):
         super().__init__(config)
         self._api_base = config.api_base or "https://api.cohere.com/v2"
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers."""
         api_key = self._get_api_key("COHERE_API_KEY")
         headers = {
@@ -215,7 +216,7 @@ class CohereAdapter(BaseAdapter):
                 }
 
         url = f"{self._api_base}/chat"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -228,8 +229,8 @@ class CohereAdapter(BaseAdapter):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse Cohere chat response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse response JSON: {e}",
                 provider=self.provider_name,
@@ -240,16 +241,19 @@ class CohereAdapter(BaseAdapter):
 
     def _build_model_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Build ModelResponse from Cohere response."""
+        # Cache timestamp once for this response
+        now = int(time.time())
         # Cohere v2 returns message directly
         message_data = resp.get("message", {})
         content_list = message_data.get("content", [])
 
-        text_content = ""
+        # Use list + join for efficient string building
+        text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
 
         for item in content_list:
             if item.get("type") == "text":
-                text_content += item.get("text", "")
+                text_parts.append(item.get("text", ""))
             elif item.get("type") == "tool_call":
                 tc = item
                 tool_calls.append(
@@ -258,7 +262,7 @@ class CohereAdapter(BaseAdapter):
                         type="function",
                         function=FunctionCall(
                             name=tc.get("name", ""),
-                            arguments=json.dumps(tc.get("parameters", {})),
+                            arguments=orjson.dumps(tc.get("parameters", {})).decode(),
                         ),
                     )
                 )
@@ -278,9 +282,10 @@ class CohereAdapter(BaseAdapter):
                     )
                 )
 
+        text_content = "".join(text_parts) if text_parts else None
         message = Message(
             role="assistant",
-            content=text_content if text_content else None,
+            content=text_content,
             tool_calls=tool_calls if tool_calls else None,
         )
 
@@ -314,7 +319,7 @@ class CohereAdapter(BaseAdapter):
         return ModelResponse(
             id=resp.get("id", ""),
             object="chat.completion",
-            created=int(time.time()),
+            created=now,
             model=model,
             choices=[choice],
             usage=usage,
@@ -328,8 +333,8 @@ class CohereAdapter(BaseAdapter):
             return None
 
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError:
+            event = orjson.loads(data)
+        except orjson.JSONDecodeError:
             return None
 
         event_type = event.get("type", "")
@@ -347,10 +352,10 @@ class CohereAdapter(BaseAdapter):
                 ],
             )
 
-        elif event_type == "content-start":
+        if event_type == "content-start":
             return None  # Skip content start markers
 
-        elif event_type == "content-delta":
+        if event_type == "content-delta":
             delta_data = event.get("delta", {})
             message = delta_data.get("message", {})
             content = message.get("content", {})
@@ -368,7 +373,7 @@ class CohereAdapter(BaseAdapter):
                 ],
             )
 
-        elif event_type == "tool-call-start":
+        if event_type == "tool-call-start":
             delta_data = event.get("delta", {})
             tc = delta_data.get("tool_call", {})
             return StreamChunk(
@@ -395,7 +400,7 @@ class CohereAdapter(BaseAdapter):
                 ],
             )
 
-        elif event_type == "tool-call-delta":
+        if event_type == "tool-call-delta":
             delta_data = event.get("delta", {})
             tc = delta_data.get("tool_call", {})
             args = tc.get("parameters", "")
@@ -421,7 +426,7 @@ class CohereAdapter(BaseAdapter):
                 ],
             )
 
-        elif event_type == "message-end":
+        if event_type == "message-end":
             delta_data = event.get("delta", {})
             finish_reason_map = {
                 "COMPLETE": "stop",
@@ -468,9 +473,9 @@ class CohereAdapter(BaseAdapter):
     ) -> ArcLLMError:
         """Parse Cohere error response."""
         try:
-            error_data = json.loads(data.decode("utf-8"))
+            error_data = orjson.loads(data)
             message = error_data.get("message", "Unknown error")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
 
         if status_code == 401:
@@ -480,34 +485,33 @@ class CohereAdapter(BaseAdapter):
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 429:
+        if status_code == 429:
             return RateLimitError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 400:
+        if status_code == 400:
             return InvalidRequestError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 404:
+        if status_code == 404:
             return UnsupportedModelError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        else:
-            return ProviderAPIError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+        return ProviderAPIError(
+            message,
+            provider=self.provider_name,
+            status_code=status_code,
+            request_id=request_id,
+        )
 
     def build_embedding_request(
         self,
@@ -527,7 +531,7 @@ class CohereAdapter(BaseAdapter):
             body["truncate"] = kwargs["truncate"]
 
         url = f"{self._api_base}/embed"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -540,8 +544,8 @@ class CohereAdapter(BaseAdapter):
     def parse_embedding_response(self, data: bytes, model: str) -> EmbeddingResponse:
         """Parse Cohere embedding response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse embedding response: {e}",
                 provider=self.provider_name,

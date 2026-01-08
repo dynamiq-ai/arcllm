@@ -149,19 +149,19 @@ def parse_model_string(model: str) -> tuple[str, str]:
     model_lower = model.lower()
     if model_lower.startswith("gpt-") or model_lower.startswith("o1"):
         return "openai", model
-    elif model_lower.startswith("claude-"):
+    if model_lower.startswith("claude-"):
         return "anthropic", model
-    elif model_lower.startswith("gemini-"):
+    if model_lower.startswith("gemini-"):
         return "gemini", model
-    elif model_lower.startswith("mistral-") or model_lower.startswith("codestral"):
+    if model_lower.startswith("mistral-") or model_lower.startswith("codestral"):
         return "mistral", model
-    elif model_lower.startswith("command-"):
+    if model_lower.startswith("command-"):
         return "cohere", model
-    elif model_lower.startswith("deepseek-"):
+    if model_lower.startswith("deepseek-"):
         return "deepseek", model
-    elif model_lower.startswith("llama-") or model_lower.startswith("llama3"):
+    if model_lower.startswith("llama-") or model_lower.startswith("llama3"):
         return "groq", model  # Default to Groq for Llama
-    elif model_lower.startswith("pplx-"):
+    if model_lower.startswith("pplx-"):
         return "perplexity", model
 
     # Default to OpenAI if can't infer
@@ -298,6 +298,9 @@ class BaseAdapter(ABC):
     Base class for provider adapters with common functionality.
 
     Subclasses must implement the abstract methods for provider-specific logic.
+
+    Performance optimization: Headers are cached after first build to avoid
+    repeated dict creation and string formatting on every request.
     """
 
     provider_name: str = "base"
@@ -305,8 +308,12 @@ class BaseAdapter(ABC):
     # Parameters supported by this provider (override in subclass)
     supported_params: set[str] = COMMON_PARAMS
 
+    # Cached headers (built once, reused for all requests)
+    _cached_headers: dict[str, str] | None = None
+
     def __init__(self, config: ProviderConfig) -> None:
         self.config = config
+        self._cached_headers = None  # Reset cache for this instance
 
     def _check_params(
         self,
@@ -334,12 +341,11 @@ class BaseAdapter(ABC):
             if drop_params:
                 # Remove unsupported params
                 return {k: v for k, v in kwargs.items() if k in self.supported_params}
-            else:
-                raise UnsupportedParameterError(
-                    f"Unsupported parameters for {self.provider_name}: {sorted(unsupported)}",
-                    provider=self.provider_name,
-                    unsupported_params=list(unsupported),
-                )
+            raise UnsupportedParameterError(
+                f"Unsupported parameters for {self.provider_name}: {sorted(unsupported)}",
+                provider=self.provider_name,
+                unsupported_params=list(unsupported),
+            )
         return kwargs
 
     def _get_api_key(self, env_var: str, param_key: str = "api_key") -> str:
@@ -351,6 +357,29 @@ class BaseAdapter(ABC):
                 provider=self.provider_name,
             )
         return key
+
+    def _build_headers(self) -> dict[str, str]:
+        """
+        Build request headers. Override in subclass to customize.
+
+        This method is called once and the result is cached.
+        """
+        return {"Content-Type": "application/json"}
+
+    def _get_headers(self) -> dict[str, str]:
+        """
+        Get cached request headers.
+
+        Headers are built once on first call and cached for subsequent requests.
+        This avoids repeated dict creation and string formatting overhead.
+        """
+        if self._cached_headers is None:
+            self._cached_headers = self._build_headers()
+        return self._cached_headers
+
+    def _invalidate_header_cache(self) -> None:
+        """Invalidate cached headers (e.g., if API key changes)."""
+        self._cached_headers = None
 
     @abstractmethod
     def build_request(
@@ -426,14 +455,58 @@ def get_provider(name: str, config: ProviderConfig | None = None) -> Adapter:
         UnsupportedModelError: If provider is not supported
     """
     name = name.lower()
+
+    # Lazy load the provider if not already registered
+    if name not in _PROVIDERS:
+        _lazy_load_provider(name)
+
     if name not in _PROVIDERS:
         raise UnsupportedModelError(
-            f"Provider '{name}' is not supported. Supported providers: {list(_PROVIDERS.keys())}",
+            f"Provider '{name}' is not supported. Supported providers: {SUPPORTED_PROVIDERS}",
             provider=name,
         )
 
     adapter_class = _PROVIDERS[name]
     return adapter_class(config or ProviderConfig())
+
+
+# Lazy provider loading - only import adapters when needed
+_PROVIDER_MODULES: dict[str, tuple[str, str]] = {
+    "openai": ("arcllm.providers.openai_adapter", "OpenAIAdapter"),
+    "azure": ("arcllm.providers.azure_adapter", "AzureOpenAIAdapter"),
+    "anthropic": ("arcllm.providers.anthropic_adapter", "AnthropicAdapter"),
+    "gemini": ("arcllm.providers.gemini_adapter", "GeminiAdapter"),
+    "vertex_ai": ("arcllm.providers.vertex_adapter", "VertexAIAdapter"),
+    "bedrock": ("arcllm.providers.bedrock_adapter", "BedrockAdapter"),
+    "mistral": ("arcllm.providers.mistral_adapter", "MistralAdapter"),
+    "cohere": ("arcllm.providers.cohere_adapter", "CohereAdapter"),
+    "groq": ("arcllm.providers.groq_adapter", "GroqAdapter"),
+    "together_ai": ("arcllm.providers.together_adapter", "TogetherAdapter"),
+    "fireworks_ai": ("arcllm.providers.fireworks_adapter", "FireworksAdapter"),
+    "deepseek": ("arcllm.providers.deepseek_adapter", "DeepSeekAdapter"),
+    "perplexity": ("arcllm.providers.perplexity_adapter", "PerplexityAdapter"),
+    "databricks": ("arcllm.providers.databricks_adapter", "DatabricksAdapter"),
+    "ollama": ("arcllm.providers.ollama_adapter", "OllamaAdapter"),
+}
+
+
+def _lazy_load_provider(name: str) -> None:
+    """Lazily load and register a provider adapter."""
+    if name in _PROVIDERS:
+        return
+
+    if name not in _PROVIDER_MODULES:
+        return
+
+    module_name, class_name = _PROVIDER_MODULES[name]
+    try:
+        import importlib
+
+        module = importlib.import_module(module_name)
+        adapter_class = getattr(module, class_name)
+        register_provider(name, adapter_class)
+    except (ImportError, AttributeError):
+        pass
 
 
 # Import provider modules to trigger registration

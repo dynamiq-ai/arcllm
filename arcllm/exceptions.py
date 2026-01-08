@@ -10,10 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "ArcLLMError",
     "AuthenticationError",
     "ConnectionError",
     "ContentFilterError",
-    "ArcLLMError",
     "InvalidRequestError",
     "ProviderAPIError",
     "RateLimitError",
@@ -261,19 +261,18 @@ def map_status_code_to_exception(
     """
     if status_code == 401:
         return AuthenticationError(message, status_code=status_code, **kwargs)
-    elif status_code == 403:
+    if status_code == 403:
         return AuthenticationError(
             f"Permission denied: {message}", status_code=status_code, **kwargs
         )
-    elif status_code == 429:
+    if status_code == 429:
         return RateLimitError(message, status_code=status_code, **kwargs)
-    elif status_code == 404:
+    if status_code == 404:
         return UnsupportedModelError(message, status_code=status_code, **kwargs)
-    elif status_code == 400:
+    if status_code == 400:
         return InvalidRequestError(message, status_code=status_code, **kwargs)
-    elif status_code == 408:
+    if status_code == 408:
         return TimeoutError(message, status_code=status_code, **kwargs)
-    elif status_code >= 500:
+    if status_code >= 500:
         return ProviderAPIError(f"Server error: {message}", status_code=status_code, **kwargs)
-    else:
-        return ProviderAPIError(message, status_code=status_code, **kwargs)
+    return ProviderAPIError(message, status_code=status_code, **kwargs)

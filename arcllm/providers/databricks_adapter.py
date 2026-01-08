@@ -6,9 +6,10 @@ Databricks provides model serving with an OpenAI-compatible API.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
+
+import orjson
 
 from arcllm.exceptions import AuthenticationError
 from arcllm.providers.base import (
@@ -42,7 +43,7 @@ class DatabricksAdapter(OpenAIAdapter):
                 provider=self.provider_name,
             )
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers with Databricks authentication."""
         api_key = self.config.api_key or os.environ.get("DATABRICKS_TOKEN")
         if not api_key:
@@ -97,7 +98,7 @@ class DatabricksAdapter(OpenAIAdapter):
 
         # Databricks endpoint structure: /serving-endpoints/{endpoint_name}/invocations
         url = f"{self._api_base}/{model}/invocations"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -120,7 +121,7 @@ class DatabricksAdapter(OpenAIAdapter):
         }
 
         url = f"{self._api_base}/{model}/invocations"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",

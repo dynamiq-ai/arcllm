@@ -6,8 +6,9 @@ Mistral uses an OpenAI-compatible API format with minor differences.
 
 from __future__ import annotations
 
-import json
 from typing import Any
+
+import orjson
 
 from arcllm.providers.base import (
     ProviderConfig,
@@ -32,7 +33,7 @@ class MistralAdapter(OpenAIAdapter):
         super().__init__(config)
         self._api_base = config.api_base or "https://api.mistral.ai/v1"
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers."""
         api_key = self._get_api_key("MISTRAL_API_KEY")
         headers = {
@@ -93,7 +94,7 @@ class MistralAdapter(OpenAIAdapter):
             body["response_format"] = kwargs["response_format"]
 
         url = f"{self._api_base}/chat/completions"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -120,7 +121,7 @@ class MistralAdapter(OpenAIAdapter):
             body["encoding_format"] = kwargs["encoding_format"]
 
         url = f"{self._api_base}/embeddings"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",

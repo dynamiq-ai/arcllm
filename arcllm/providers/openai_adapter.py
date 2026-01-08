@@ -7,18 +7,55 @@ Supports:
 - Structured output (JSON mode and JSON schema)
 - Embeddings
 - Vision (image inputs)
+- PDF document input (GPT-5 series)
+
+=============================================================================
+OpenAI API Documentation References (January 2026)
+=============================================================================
+
+IMPORTANT MODEL UPDATES:
+- GPT-5.2 is the current flagship (released December 11, 2025)
+- GPT-4o is retiring on February 16, 2026 - migrate to GPT-5 series
+- GPT-3.5-turbo is deprecated
+
+Core API Endpoints:
+    platform.openai.com/docs/api-reference/chat/create
+    platform.openai.com/docs/api-reference/embeddings/create
+
+Models:
+    platform.openai.com/docs/models (overview)
+    platform.openai.com/docs/models/gpt-5 (current flagship)
+    platform.openai.com/docs/models/o1 (reasoning models)
+    platform.openai.com/docs/models/gpt-4o (deprecated Feb 2026)
+
+Features:
+    platform.openai.com/docs/api-reference/streaming
+    platform.openai.com/docs/guides/function-calling
+    platform.openai.com/docs/guides/structured-outputs
+    platform.openai.com/docs/guides/vision
+
+Pricing:
+    openai.com/pricing
+
+Error Handling:
+    platform.openai.com/docs/guides/error-codes
+
+See docs/providers/openai.md for full documentation
+
+Last Updated: 2026-01-08
 """
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
+import orjson
+
 from arcllm.exceptions import (
+    ArcLLMError,
     AuthenticationError,
     ContentFilterError,
-    ArcLLMError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
@@ -71,8 +108,8 @@ class OpenAIAdapter(BaseAdapter):
         super().__init__(config)
         self._api_base = config.api_base or "https://api.openai.com/v1"
 
-    def _get_headers(self) -> dict[str, str]:
-        """Get request headers."""
+    def _build_headers(self) -> dict[str, str]:
+        """Build request headers (cached after first call)."""
         api_key = self._get_api_key("OPENAI_API_KEY")
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -112,9 +149,15 @@ class OpenAIAdapter(BaseAdapter):
             if stream_options:
                 body["stream_options"] = stream_options
 
-        # Handle max_tokens vs max_completion_tokens for o1 models
-        if model.startswith("o1") and "max_tokens" in kwargs:
-            # o1 models use max_completion_tokens
+        # Handle max_tokens vs max_completion_tokens for newer models
+        # o1, o3, gpt-5, gpt-4.1 models use max_completion_tokens instead of max_tokens
+        uses_completion_tokens = (
+            model.startswith("o1")
+            or model.startswith("o3")
+            or model.startswith("gpt-5")
+            or model.startswith("gpt-4.1")
+        )
+        if uses_completion_tokens and "max_tokens" in kwargs:
             if "max_completion_tokens" not in kwargs:
                 kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
             else:
@@ -157,7 +200,7 @@ class OpenAIAdapter(BaseAdapter):
             body["response_format"] = kwargs["response_format"]
 
         url = f"{self._api_base}/chat/completions"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -170,8 +213,8 @@ class OpenAIAdapter(BaseAdapter):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse OpenAI chat completion response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse response JSON: {e}",
                 provider=self.provider_name,
@@ -182,6 +225,8 @@ class OpenAIAdapter(BaseAdapter):
 
     def _build_model_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Build ModelResponse from parsed JSON."""
+        # Cache timestamp once for this response (avoids multiple syscalls)
+        now = int(time.time())
         choices: list[Choice] = []
 
         for choice_data in resp.get("choices", []):
@@ -245,7 +290,7 @@ class OpenAIAdapter(BaseAdapter):
         return ModelResponse(
             id=resp.get("id", ""),
             object=resp.get("object", "chat.completion"),
-            created=resp.get("created", int(time.time())),
+            created=resp.get("created", now),
             model=resp.get("model", model),
             choices=choices,
             usage=usage,
@@ -260,14 +305,16 @@ class OpenAIAdapter(BaseAdapter):
             return None
 
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError as e:
+            event = orjson.loads(data)
+        except orjson.JSONDecodeError as e:
             raise ResponseParseError(
                 f"Failed to parse stream event: {e}",
                 provider=self.provider_name,
                 raw_data=data,
             ) from e
 
+        # Cache timestamp once for this event
+        now = int(time.time())
         choices: list[ChunkChoice] = []
 
         for choice_data in event.get("choices", []):
@@ -309,7 +356,7 @@ class OpenAIAdapter(BaseAdapter):
         return StreamChunk(
             id=event.get("id", ""),
             object=event.get("object", "chat.completion.chunk"),
-            created=event.get("created", int(time.time())),
+            created=event.get("created", now),
             model=event.get("model", model),
             choices=choices,
             usage=usage,
@@ -324,12 +371,12 @@ class OpenAIAdapter(BaseAdapter):
     ) -> ArcLLMError:
         """Parse OpenAI error response."""
         try:
-            error_data = json.loads(data.decode("utf-8"))
+            error_data = orjson.loads(data)
             error = error_data.get("error", {})
             message = error.get("message", "Unknown error")
             error_type = error.get("type", "")
             error_code = error.get("code", "")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
             error_type = ""
             error_code = ""
@@ -342,15 +389,19 @@ class OpenAIAdapter(BaseAdapter):
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 429:
+        if status_code == 429:
             return RateLimitError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 400:
-            if "content_filter" in error_code.lower() or "content_policy" in message.lower():
+        if status_code == 400:
+            # error_code can be string or int depending on provider
+            error_code_str = str(error_code) if error_code is not None else ""
+            error_code_lower = error_code_str.lower()
+            message_lower = (message or "").lower()
+            if "content_filter" in error_code_lower or "content_policy" in message_lower:
                 return ContentFilterError(
                     message,
                     provider=self.provider_name,
@@ -364,22 +415,21 @@ class OpenAIAdapter(BaseAdapter):
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 404:
+        if status_code == 404:
             return UnsupportedModelError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        else:
-            return ProviderAPIError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-                error_type=error_type,
-                error_code=error_code,
-            )
+        return ProviderAPIError(
+            message,
+            provider=self.provider_name,
+            status_code=status_code,
+            request_id=request_id,
+            error_type=error_type,
+            error_code=error_code,
+        )
 
     def build_embedding_request(
         self,
@@ -403,7 +453,7 @@ class OpenAIAdapter(BaseAdapter):
             body["user"] = kwargs["user"]
 
         url = f"{self._api_base}/embeddings"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -416,8 +466,8 @@ class OpenAIAdapter(BaseAdapter):
     def parse_embedding_response(self, data: bytes, model: str) -> EmbeddingResponse:
         """Parse OpenAI embedding response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse embedding response: {e}",
                 provider=self.provider_name,

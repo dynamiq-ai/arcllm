@@ -1,9 +1,9 @@
 """
 ArcLLM - The arc connecting you to every LLM.
 
-Zero dependencies. Maximum performance. One unified API.
+Minimal dependencies. Maximum performance. One unified API.
 
-ArcLLM provides a minimal, high-performance interface for calling
+ArcLLM provides a high-performance interface for calling
 multiple LLM providers with a unified OpenAI-compatible API.
 
 Basic Usage:
@@ -37,6 +37,15 @@ Basic Usage:
         input=["Hello world", "Goodbye world"]
     )
 
+Performance Tips:
+    # For maximum async performance on Unix, install uvloop:
+    # pip install arcllm[performance]
+    #
+    # Then at the start of your application:
+    import uvloop
+    uvloop.install()
+    # Or use arcllm.install_uvloop() for automatic detection
+
 Supported Providers:
     - OpenAI (openai/)
     - Azure OpenAI (azure/)
@@ -61,6 +70,8 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 __all__ = [
+    # Exceptions
+    "ArcLLMError",
     "AuthenticationError",
     "Choice",
     "ChunkChoice",
@@ -70,8 +81,6 @@ __all__ = [
     "EmbeddingData",
     "EmbeddingResponse",
     "EmbeddingUsage",
-    # Exceptions
-    "ArcLLMError",
     "FunctionCall",
     "InvalidRequestError",
     "Message",
@@ -100,12 +109,43 @@ __all__ = [
     # Capabilities
     "get_max_tokens",
     "get_model_pricing",
+    # Performance
+    "install_uvloop",
     "stream_chunk_builder",
     "supports_pdf_input",
     "supports_structured_output",
     "supports_tools",
     "supports_vision",
 ]
+
+
+def install_uvloop() -> bool:
+    """
+    Install uvloop as the default event loop policy for better async performance.
+
+    uvloop is a fast, drop-in replacement for asyncio's event loop.
+    It provides ~10-15% improvement for async operations on Unix systems.
+
+    Returns:
+        True if uvloop was installed, False if unavailable (e.g., on Windows)
+
+    Example:
+        import arcllm
+        arcllm.install_uvloop()  # Call once at application startup
+
+        # Then use async operations as normal
+        response = await arcllm.acompletion(...)
+    """
+    try:
+        import uvloop
+
+        uvloop.install()
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        # uvloop might fail on some platforms
+        return False
 
 # Core API functions
 # Capabilities
@@ -126,10 +166,10 @@ from arcllm.core import (
 
 # Exceptions
 from arcllm.exceptions import (
+    ArcLLMError,
     AuthenticationError,
     ConnectionError,
     ContentFilterError,
-    ArcLLMError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
@@ -146,9 +186,7 @@ from arcllm.pricing import (
     get_model_pricing,
 )
 
-# Register all providers on first import
-from arcllm.providers.base import register_all_providers
-
+# Providers are now lazy-loaded when first accessed
 # Types
 from arcllm.types import (
     Choice,
@@ -165,5 +203,3 @@ from arcllm.types import (
     ToolCall,
     Usage,
 )
-
-register_all_providers()

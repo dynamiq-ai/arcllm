@@ -45,10 +45,47 @@ __all__ = [
     "stream_chunk_builder",
 ]
 
+# Pre-computed frozenset of config parameters to exclude from completion kwargs.
+# Using frozenset at module level avoids recreating the set on every call.
+_CONFIG_PARAMS: frozenset[str] = frozenset({
+    "api_key",
+    "api_base",
+    "base_url",
+    "api_version",
+    "organization",
+    "project",
+    "timeout",
+    "max_retries",
+    "provider",
+    "azure_deployment",
+    "azure_ad_token",
+    "aws_region",
+    "aws_access_key_id",
+    "aws_secret_access_key",
+    "aws_session_token",
+    "vertex_project",
+    "vertex_location",
+    "extra_headers",
+})
+
+# Subset for embedding requests (fewer params needed)
+_EMBEDDING_CONFIG_PARAMS: frozenset[str] = frozenset({
+    "api_key",
+    "api_base",
+    "base_url",
+    "api_version",
+    "organization",
+    "project",
+    "timeout",
+    "max_retries",
+    "provider",
+    "extra_headers",
+})
 
 # Global HTTP clients (lazy initialized)
 _http_client: HTTPClient | None = None
 _async_http_client: AsyncHTTPClient | None = None
+_async_client_loop_id: int | None = None  # Track which event loop the client was created for
 
 
 def _get_http_client() -> HTTPClient:
@@ -60,11 +97,43 @@ def _get_http_client() -> HTTPClient:
 
 
 def _get_async_http_client() -> AsyncHTTPClient:
-    """Get or create global async HTTP client."""
-    global _async_http_client
-    if _async_http_client is None:
+    """
+    Get or create global async HTTP client.
+
+    The async client is bound to the current event loop. If the loop changes
+    (e.g., between pytest tests), we create a new client to avoid
+    "Event loop is closed" errors.
+    """
+    import asyncio
+
+    global _async_http_client, _async_client_loop_id
+
+    try:
+        loop = asyncio.get_running_loop()
+        current_loop_id = id(loop)
+    except RuntimeError:
+        # No running loop - will be created when needed
+        current_loop_id = None
+
+    # Create new client if none exists or loop has changed
+    if _async_http_client is None or _async_client_loop_id != current_loop_id:
+        # Note: We don't close the old client here because:
+        # 1. It might still have pending requests
+        # 2. Calling close() from sync context is problematic
+        # The old client will be garbage collected
         _async_http_client = AsyncHTTPClient()
+        _async_client_loop_id = current_loop_id
+
     return _async_http_client
+
+
+async def _cleanup_async_client() -> None:
+    """Clean up the global async HTTP client. Call on shutdown."""
+    global _async_http_client, _async_client_loop_id
+    if _async_http_client is not None:
+        await _async_http_client.close()
+        _async_http_client = None
+        _async_client_loop_id = None
 
 
 def _build_provider_config(**kwargs: Any) -> ProviderConfig:
@@ -167,32 +236,8 @@ def completion(
     """
     adapter, model_id = _get_adapter(model, **kwargs)
 
-    # Remove config params from kwargs
-    completion_kwargs = {
-        k: v
-        for k, v in kwargs.items()
-        if k
-        not in {
-            "api_key",
-            "api_base",
-            "base_url",
-            "api_version",
-            "organization",
-            "project",
-            "timeout",
-            "max_retries",
-            "provider",
-            "azure_deployment",
-            "azure_ad_token",
-            "aws_region",
-            "aws_access_key_id",
-            "aws_secret_access_key",
-            "aws_session_token",
-            "vertex_project",
-            "vertex_location",
-            "extra_headers",
-        }
-    }
+    # Remove config params from kwargs using pre-computed frozenset
+    completion_kwargs = {k: v for k, v in kwargs.items() if k not in _CONFIG_PARAMS}
 
     # Build request
     request = adapter.build_request(
@@ -206,8 +251,7 @@ def completion(
 
     if stream:
         return _stream_completion(adapter, model_id, request, client)
-    else:
-        return _sync_completion(adapter, model_id, request, client)
+    return _sync_completion(adapter, model_id, request, client)
 
 
 def _sync_completion(
@@ -300,32 +344,8 @@ async def acompletion(
     """
     adapter, model_id = _get_adapter(model, **kwargs)
 
-    # Remove config params from kwargs
-    completion_kwargs = {
-        k: v
-        for k, v in kwargs.items()
-        if k
-        not in {
-            "api_key",
-            "api_base",
-            "base_url",
-            "api_version",
-            "organization",
-            "project",
-            "timeout",
-            "max_retries",
-            "provider",
-            "azure_deployment",
-            "azure_ad_token",
-            "aws_region",
-            "aws_access_key_id",
-            "aws_secret_access_key",
-            "aws_session_token",
-            "vertex_project",
-            "vertex_location",
-            "extra_headers",
-        }
-    }
+    # Remove config params from kwargs using pre-computed frozenset
+    completion_kwargs = {k: v for k, v in kwargs.items() if k not in _CONFIG_PARAMS}
 
     # Build request
     request = adapter.build_request(
@@ -339,8 +359,7 @@ async def acompletion(
 
     if stream:
         return _astream_completion(adapter, model_id, request, client)
-    else:
-        return await _async_completion(adapter, model_id, request, client)
+    return await _async_completion(adapter, model_id, request, client)
 
 
 async def _async_completion(
@@ -421,27 +440,11 @@ def embedding(
     if isinstance(input, str):
         input = [input]
 
-    # Build request
+    # Build request using pre-computed frozenset for param filtering
     request = adapter.build_embedding_request(
         model=model_id,
         input=input,
-        **{
-            k: v
-            for k, v in kwargs.items()
-            if k
-            not in {
-                "api_key",
-                "api_base",
-                "base_url",
-                "api_version",
-                "organization",
-                "project",
-                "timeout",
-                "max_retries",
-                "provider",
-                "extra_headers",
-            }
-        },
+        **{k: v for k, v in kwargs.items() if k not in _EMBEDDING_CONFIG_PARAMS},
     )
 
     client = _get_http_client()
@@ -487,27 +490,11 @@ async def aembedding(
     if isinstance(input, str):
         input = [input]
 
-    # Build request
+    # Build request using pre-computed frozenset for param filtering
     request = adapter.build_embedding_request(
         model=model_id,
         input=input,
-        **{
-            k: v
-            for k, v in kwargs.items()
-            if k
-            not in {
-                "api_key",
-                "api_base",
-                "base_url",
-                "api_version",
-                "organization",
-                "project",
-                "timeout",
-                "max_retries",
-                "provider",
-                "extra_headers",
-            }
-        },
+        **{k: v for k, v in kwargs.items() if k not in _EMBEDDING_CONFIG_PARAMS},
     )
 
     client = _get_async_http_client()

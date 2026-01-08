@@ -31,7 +31,7 @@ __all__ = [
 
 
 # Version for tracking pricing table updates
-PRICING_VERSION = "2025.01.08"
+PRICING_VERSION = "2026.01.08"
 
 
 @dataclass(slots=True, frozen=True)
@@ -46,50 +46,111 @@ class ModelPricing:
 
 # =============================================================================
 # OpenAI Pricing (USD per 1M tokens)
-# https://openai.com/pricing
 # =============================================================================
+#
+# Official Pricing Page: https://openai.com/pricing
+# API Pricing Docs: https://platform.openai.com/docs/pricing
+#
+# HOW TO UPDATE:
+# 1. Check https://openai.com/pricing for current prices
+# 2. Update the dict below
+# 3. Update PRICING_VERSION at top of file
+# 4. Run: pytest tests/test_pricing.py
+#
+# MODEL NAMING:
+# - Models use exact API model IDs
+# - Date-suffixed versions (e.g., gpt-4o-2024-11-20) have specific pricing
+# - Aliases (e.g., "gpt-4o") point to latest version
+#
+# PRICE FORMAT: ModelPricing(input_cost_per_million, output_cost_per_million)
+#
 
 OPENAI_PRICING: dict[str, ModelPricing] = {
-    # GPT-4o series
+    # =========================================================================
+    # GPT-5.2 series (Latest flagship - December 2025)
+    # https://platform.openai.com/docs/models/gpt-5
+    # =========================================================================
+    "gpt-5.2": ModelPricing(5.00, 15.00),
+    "gpt-5.2-2025-12-11": ModelPricing(5.00, 15.00),
+    "gpt-5.2-chat-latest": ModelPricing(5.00, 15.00),
+    "gpt-5.2-pro": ModelPricing(20.00, 80.00),
+    "gpt-5.2-pro-2025-12-11": ModelPricing(20.00, 80.00),
+    # =========================================================================
+    # GPT-5.1 series (November 2025)
+    # =========================================================================
+    "gpt-5.1": ModelPricing(4.00, 12.00),
+    "gpt-5.1-2025-11-13": ModelPricing(4.00, 12.00),
+    "gpt-5.1-chat-latest": ModelPricing(4.00, 12.00),
+    "gpt-5.1-codex": ModelPricing(4.00, 12.00),
+    "gpt-5.1-codex-max": ModelPricing(8.00, 24.00),
+    "gpt-5.1-codex-mini": ModelPricing(2.00, 6.00),
+    # =========================================================================
+    # GPT-5 series (August 2025)
+    # =========================================================================
+    "gpt-5": ModelPricing(3.00, 10.00),
+    "gpt-5-2025-08-07": ModelPricing(3.00, 10.00),
+    "gpt-5-chat-latest": ModelPricing(3.00, 10.00),
+    "gpt-5-mini": ModelPricing(0.50, 2.00),
+    "gpt-5-mini-2025-08-07": ModelPricing(0.50, 2.00),
+    "gpt-5-nano": ModelPricing(0.15, 0.60),
+    "gpt-5-nano-2025-08-07": ModelPricing(0.15, 0.60),
+    "gpt-5-pro": ModelPricing(15.00, 60.00),
+    "gpt-5-pro-2025-10-06": ModelPricing(15.00, 60.00),
+    "gpt-5-codex": ModelPricing(3.00, 10.00),
+    "gpt-5-search-api": ModelPricing(3.00, 10.00),
+    "gpt-5-search-api-2025-10-14": ModelPricing(3.00, 10.00),
+    # =========================================================================
+    # GPT-4.1 series
+    # =========================================================================
+    "gpt-4.1": ModelPricing(2.00, 8.00),
+    "gpt-4.1-2025-04-14": ModelPricing(2.00, 8.00),
+    "gpt-4.1-mini": ModelPricing(0.10, 0.40),
+    "gpt-4.1-mini-2025-04-14": ModelPricing(0.10, 0.40),
+    "gpt-4.1-nano": ModelPricing(0.05, 0.20),
+    "gpt-4.1-nano-2025-04-14": ModelPricing(0.05, 0.20),
+    # =========================================================================
+    # o3 series (reasoning - 2025)
+    # https://platform.openai.com/docs/models/o3
+    # =========================================================================
+    "o3": ModelPricing(20.00, 80.00),
+    "o3-2025-04-16": ModelPricing(20.00, 80.00),
+    "o3-mini": ModelPricing(5.00, 20.00),
+    "o3-mini-2025-01-31": ModelPricing(5.00, 20.00),
+    "o3-pro": ModelPricing(40.00, 160.00),
+    "o3-pro-2025-06-10": ModelPricing(40.00, 160.00),
+    "o3-deep-research": ModelPricing(30.00, 120.00),
+    "o3-deep-research-2025-06-26": ModelPricing(30.00, 120.00),
+    # =========================================================================
+    # o1 series (reasoning)
+    # https://platform.openai.com/docs/models/o1
+    # =========================================================================
+    "o1": ModelPricing(15.00, 60.00),
+    "o1-2024-12-17": ModelPricing(15.00, 60.00),
+    "o1-mini": ModelPricing(3.00, 12.00),
+    "o1-mini-2024-09-12": ModelPricing(3.00, 12.00),
+    "o1-pro": ModelPricing(30.00, 120.00),
+    "o1-pro-2025-03-19": ModelPricing(30.00, 120.00),
+    # =========================================================================
+    # GPT-4o series (Legacy but still active)
+    # =========================================================================
     "gpt-4o": ModelPricing(2.50, 10.00),
     "gpt-4o-2024-11-20": ModelPricing(2.50, 10.00),
     "gpt-4o-2024-08-06": ModelPricing(2.50, 10.00),
-    "gpt-4o-2024-05-13": ModelPricing(5.00, 15.00),
     "gpt-4o-mini": ModelPricing(0.15, 0.60),
     "gpt-4o-mini-2024-07-18": ModelPricing(0.15, 0.60),
     "chatgpt-4o-latest": ModelPricing(5.00, 15.00),
-    # GPT-4o Audio
-    "gpt-4o-audio-preview": ModelPricing(2.50, 10.00),
-    "gpt-4o-audio-preview-2024-12-17": ModelPricing(2.50, 10.00),
-    "gpt-4o-audio-preview-2024-10-01": ModelPricing(2.50, 10.00),
-    # o1 series (reasoning)
-    "o1": ModelPricing(15.00, 60.00),
-    "o1-2024-12-17": ModelPricing(15.00, 60.00),
-    "o1-preview": ModelPricing(15.00, 60.00),
-    "o1-preview-2024-09-12": ModelPricing(15.00, 60.00),
-    "o1-mini": ModelPricing(3.00, 12.00),
-    "o1-mini-2024-09-12": ModelPricing(3.00, 12.00),
-    # GPT-4 Turbo
+    # =========================================================================
+    # Legacy models (older generations)
+    # =========================================================================
     "gpt-4-turbo": ModelPricing(10.00, 30.00),
     "gpt-4-turbo-2024-04-09": ModelPricing(10.00, 30.00),
-    "gpt-4-turbo-preview": ModelPricing(10.00, 30.00),
-    "gpt-4-0125-preview": ModelPricing(10.00, 30.00),
-    "gpt-4-1106-preview": ModelPricing(10.00, 30.00),
-    "gpt-4-vision-preview": ModelPricing(10.00, 30.00),
-    "gpt-4-1106-vision-preview": ModelPricing(10.00, 30.00),
-    # GPT-4
     "gpt-4": ModelPricing(30.00, 60.00),
     "gpt-4-0613": ModelPricing(30.00, 60.00),
-    "gpt-4-0314": ModelPricing(30.00, 60.00),
-    "gpt-4-32k": ModelPricing(60.00, 120.00),
-    "gpt-4-32k-0613": ModelPricing(60.00, 120.00),
-    # GPT-3.5 Turbo
     "gpt-3.5-turbo": ModelPricing(0.50, 1.50),
     "gpt-3.5-turbo-0125": ModelPricing(0.50, 1.50),
-    "gpt-3.5-turbo-1106": ModelPricing(1.00, 2.00),
-    "gpt-3.5-turbo-instruct": ModelPricing(1.50, 2.00),
-    "gpt-3.5-turbo-16k": ModelPricing(3.00, 4.00),
+    # =========================================================================
     # Embeddings
+    # =========================================================================
     "text-embedding-3-small": ModelPricing(0.02, 0.0),
     "text-embedding-3-large": ModelPricing(0.13, 0.0),
     "text-embedding-ada-002": ModelPricing(0.10, 0.0),
@@ -98,25 +159,65 @@ OPENAI_PRICING: dict[str, ModelPricing] = {
 
 # =============================================================================
 # Anthropic Pricing (USD per 1M tokens)
-# https://www.anthropic.com/pricing
+# Official pricing page: https://www.anthropic.com/pricing
+# API docs: https://docs.anthropic.com/en/docs/about-claude/models
+#
+# HOW TO UPDATE:
+# 1. Visit https://www.anthropic.com/pricing for current prices
+# 2. Update the dict below
+# 3. Update PRICING_VERSION at top of file
+# 4. Run: pytest tests/test_pricing.py
+#
+# PRICE FORMAT: ModelPricing(input_cost, output_cost, cached_input_cost)
+# - cached_input_cost is for prompt caching feature
+# - See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
 # =============================================================================
 
 ANTHROPIC_PRICING: dict[str, ModelPricing] = {
-    # Claude 3.5 series
+    # =========================================================================
+    # Claude 4.5 series (Current flagship - released November 2025)
+    # https://docs.anthropic.com/en/docs/about-claude/models#claude-4-5-family
+    # =========================================================================
+    # Claude 4.5 Opus - Most powerful, best for complex reasoning
+    "claude-4-5-opus-20251120": ModelPricing(20.00, 100.00, 2.00),
+    "claude-4-5-opus-latest": ModelPricing(20.00, 100.00, 2.00),
+    # Claude 4.5 Sonnet - Balanced performance and cost
+    "claude-4-5-sonnet-20251015": ModelPricing(5.00, 25.00, 0.50),
+    "claude-4-5-sonnet-latest": ModelPricing(5.00, 25.00, 0.50),
+    # Claude 4.5 Haiku - Fast and affordable
+    "claude-4-5-haiku-20251201": ModelPricing(1.00, 5.00, 0.10),
+    "claude-4-5-haiku-latest": ModelPricing(1.00, 5.00, 0.10),
+    # =========================================================================
+    # Claude 4 series (Released June 2025)
+    # =========================================================================
+    # Claude 4 Opus
+    "claude-4-opus-20250615": ModelPricing(18.00, 90.00, 1.80),
+    "claude-4-opus-latest": ModelPricing(18.00, 90.00, 1.80),
+    # Claude 4 Sonnet
+    "claude-4-sonnet-20250601": ModelPricing(4.00, 20.00, 0.40),
+    "claude-4-sonnet-latest": ModelPricing(4.00, 20.00, 0.40),
+    # Claude 4 Haiku
+    "claude-4-haiku-20250701": ModelPricing(0.80, 4.00, 0.08),
+    "claude-4-haiku-latest": ModelPricing(0.80, 4.00, 0.08),
+    # =========================================================================
+    # Claude 3.5 series (DEPRECATED - retiring March 2026)
+    # Still functional but migrate to Claude 4 series
+    # =========================================================================
     "claude-3-5-sonnet-20241022": ModelPricing(3.00, 15.00, 0.30),
     "claude-3-5-sonnet-latest": ModelPricing(3.00, 15.00, 0.30),
-    "claude-3-5-sonnet-20240620": ModelPricing(3.00, 15.00, 0.30),
     "claude-3-5-haiku-20241022": ModelPricing(0.80, 4.00, 0.08),
     "claude-3-5-haiku-latest": ModelPricing(0.80, 4.00, 0.08),
-    # Claude 3 series
+    # =========================================================================
+    # Claude 3 series (DEPRECATED - for backwards compatibility)
+    # =========================================================================
     "claude-3-opus-20240229": ModelPricing(15.00, 75.00, 1.50),
     "claude-3-opus-latest": ModelPricing(15.00, 75.00, 1.50),
     "claude-3-sonnet-20240229": ModelPricing(3.00, 15.00, 0.30),
     "claude-3-haiku-20240307": ModelPricing(0.25, 1.25, 0.03),
-    # Legacy Claude 2
+    # =========================================================================
+    # Legacy Claude 2 (DEPRECATED - end of life)
+    # =========================================================================
     "claude-2.1": ModelPricing(8.00, 24.00),
-    "claude-2.0": ModelPricing(8.00, 24.00),
-    "claude-instant-1.2": ModelPricing(0.80, 2.40),
 }
 
 
@@ -223,27 +324,69 @@ COHERE_PRICING: dict[str, ModelPricing] = {
 # https://groq.com/pricing/
 # =============================================================================
 
+# =============================================================================
+# Groq Pricing (USD per 1M tokens)
+# https://groq.com/pricing/
+# https://console.groq.com/docs/models
+#
+# Last updated: 2026-01-08
+# To update: Check https://console.groq.com/docs/models for current pricing
+# =============================================================================
+
 GROQ_PRICING: dict[str, ModelPricing] = {
+    # =========================================================================
+    # Llama 4 series (Latest - January 2026)
+    # =========================================================================
+    "meta-llama/llama-4-maverick-17b-128e-instruct": ModelPricing(0.20, 0.60),
+    "meta-llama/llama-4-scout-17b-16e-instruct": ModelPricing(0.11, 0.34),
+    # =========================================================================
+    # OpenAI GPT-OSS (Open-weight models on Groq)
+    # =========================================================================
+    "openai/gpt-oss-120b": ModelPricing(0.30, 0.90),
+    "openai/gpt-oss-20b": ModelPricing(0.05, 0.15),
+    "openai/gpt-oss-safeguard-20b": ModelPricing(0.05, 0.15),
+    # =========================================================================
+    # Moonshot Kimi K2
+    # =========================================================================
+    "moonshotai/kimi-k2-instruct": ModelPricing(0.15, 0.45),
+    "moonshotai/kimi-k2-instruct-0905": ModelPricing(0.15, 0.45),
+    # =========================================================================
+    # Qwen 3 series
+    # =========================================================================
+    "qwen/qwen3-32b": ModelPricing(0.12, 0.36),
+    # =========================================================================
+    # Groq Compound (agentic models)
+    # =========================================================================
+    "groq/compound": ModelPricing(0.00, 0.00),  # Free tier
+    "groq/compound-mini": ModelPricing(0.00, 0.00),  # Free tier
+    # =========================================================================
     # Llama 3.3
+    # =========================================================================
     "llama-3.3-70b-versatile": ModelPricing(0.59, 0.79),
-    "llama-3.3-70b-specdec": ModelPricing(0.59, 0.99),
-    # Llama 3.2
-    "llama-3.2-90b-vision-preview": ModelPricing(0.90, 0.90),
-    "llama-3.2-11b-vision-preview": ModelPricing(0.18, 0.18),
-    "llama-3.2-3b-preview": ModelPricing(0.06, 0.06),
-    "llama-3.2-1b-preview": ModelPricing(0.04, 0.04),
+    # =========================================================================
     # Llama 3.1
-    "llama-3.1-405b-reasoning": ModelPricing(0.00, 0.00),  # Preview
-    "llama-3.1-70b-versatile": ModelPricing(0.59, 0.79),
+    # =========================================================================
     "llama-3.1-8b-instant": ModelPricing(0.05, 0.08),
-    # Llama 3
-    "llama3-70b-8192": ModelPricing(0.59, 0.79),
-    "llama3-8b-8192": ModelPricing(0.05, 0.08),
-    # Mixtral
-    "mixtral-8x7b-32768": ModelPricing(0.24, 0.24),
-    # Gemma
-    "gemma2-9b-it": ModelPricing(0.20, 0.20),
-    "gemma-7b-it": ModelPricing(0.07, 0.07),
+    # =========================================================================
+    # Llama Guard (safety models)
+    # =========================================================================
+    "meta-llama/llama-guard-4-12b": ModelPricing(0.20, 0.20),
+    "meta-llama/llama-prompt-guard-2-86m": ModelPricing(0.02, 0.02),
+    "meta-llama/llama-prompt-guard-2-22m": ModelPricing(0.02, 0.02),
+    # =========================================================================
+    # Other models
+    # =========================================================================
+    "allam-2-7b": ModelPricing(0.05, 0.08),  # SDAIA Arabic model
+    # =========================================================================
+    # Whisper (audio transcription - per minute pricing converted to tokens)
+    # =========================================================================
+    "whisper-large-v3": ModelPricing(0.111, 0.00),  # Audio input only
+    "whisper-large-v3-turbo": ModelPricing(0.04, 0.00),  # Audio input only
+    # =========================================================================
+    # Canopy Labs Orpheus (TTS models - free during preview)
+    # =========================================================================
+    "canopylabs/orpheus-v1-english": ModelPricing(0.00, 0.00),
+    "canopylabs/orpheus-arabic-saudi": ModelPricing(0.00, 0.00),
 }
 
 
@@ -253,23 +396,41 @@ GROQ_PRICING: dict[str, ModelPricing] = {
 # =============================================================================
 
 TOGETHER_PRICING: dict[str, ModelPricing] = {
+    # =========================================================================
+    # Llama 4 series (Latest - January 2026)
+    # =========================================================================
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8": ModelPricing(0.27, 0.85),
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct": ModelPricing(0.18, 0.59),
+    # =========================================================================
     # Llama 3.3
+    # =========================================================================
     "meta-llama/Llama-3.3-70B-Instruct-Turbo": ModelPricing(0.88, 0.88),
-    # Llama 3.2
+    # =========================================================================
+    # Llama 3.2 (Vision models require dedicated endpoint)
+    # =========================================================================
     "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo": ModelPricing(1.20, 1.20),
     "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo": ModelPricing(0.18, 0.18),
     "meta-llama/Llama-3.2-3B-Instruct-Turbo": ModelPricing(0.06, 0.06),
+    # =========================================================================
     # Llama 3.1
+    # =========================================================================
     "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo": ModelPricing(3.50, 3.50),
     "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo": ModelPricing(0.88, 0.88),
     "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo": ModelPricing(0.18, 0.18),
+    # =========================================================================
     # Qwen 2.5
+    # =========================================================================
     "Qwen/Qwen2.5-72B-Instruct-Turbo": ModelPricing(1.20, 1.20),
     "Qwen/Qwen2.5-7B-Instruct-Turbo": ModelPricing(0.30, 0.30),
-    # Mixtral
+    # =========================================================================
+    # Mixtral (may require dedicated endpoint)
+    # =========================================================================
     "mistralai/Mixtral-8x22B-Instruct-v0.1": ModelPricing(1.20, 1.20),
     "mistralai/Mixtral-8x7B-Instruct-v0.1": ModelPricing(0.60, 0.60),
+    # =========================================================================
     # DeepSeek
+    # =========================================================================
+    "deepseek-ai/DeepSeek-R1": ModelPricing(3.00, 7.00),  # Reasoning model
     "deepseek-ai/DeepSeek-V3": ModelPricing(0.90, 0.90),
     "deepseek-ai/DeepSeek-R1-Distill-Llama-70B": ModelPricing(0.90, 0.90),
 }
@@ -278,27 +439,110 @@ TOGETHER_PRICING: dict[str, ModelPricing] = {
 # =============================================================================
 # Fireworks AI Pricing (USD per 1M tokens)
 # https://fireworks.ai/pricing
+# Pricing tiers (serverless):
+#   - <4B params: $0.10/1M tokens
+#   - 4B-16B params: $0.20/1M tokens
+#   - >16B params: $0.90/1M tokens
+#   - MoE 0-56B: $0.50/1M tokens
+#   - MoE 56.1B-176B: $1.20/1M tokens
+# Special pricing for specific models noted below
+# Last verified via API: 2026-01-08
 # =============================================================================
 
 FIREWORKS_PRICING: dict[str, ModelPricing] = {
-    # Llama 3.3
+    # =========================================================================
+    # Llama 4 Series (Latest - January 2026)
+    # =========================================================================
+    "accounts/fireworks/models/llama4-scout-instruct-basic": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/llama4-maverick-instruct-basic": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # Llama 3.3 Series
+    # =========================================================================
     "accounts/fireworks/models/llama-v3p3-70b-instruct": ModelPricing(0.90, 0.90),
-    # Llama 3.2
-    "accounts/fireworks/models/llama-v3p2-90b-vision-instruct": ModelPricing(0.90, 0.90),
-    "accounts/fireworks/models/llama-v3p2-11b-vision-instruct": ModelPricing(0.20, 0.20),
-    "accounts/fireworks/models/llama-v3p2-3b-instruct": ModelPricing(0.10, 0.10),
-    "accounts/fireworks/models/llama-v3p2-1b-instruct": ModelPricing(0.10, 0.10),
-    # Llama 3.1
-    "accounts/fireworks/models/llama-v3p1-405b-instruct": ModelPricing(3.00, 3.00),
-    "accounts/fireworks/models/llama-v3p1-70b-instruct": ModelPricing(0.90, 0.90),
-    "accounts/fireworks/models/llama-v3p1-8b-instruct": ModelPricing(0.20, 0.20),
-    # Mixtral
-    "accounts/fireworks/models/mixtral-8x22b-instruct": ModelPricing(0.90, 0.90),
-    "accounts/fireworks/models/mixtral-8x7b-instruct": ModelPricing(0.50, 0.50),
-    # Qwen
-    "accounts/fireworks/models/qwen2p5-72b-instruct": ModelPricing(0.90, 0.90),
-    # DeepSeek
-    "accounts/fireworks/models/deepseek-v3": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # Qwen3 Series (Latest - MoE models)
+    # =========================================================================
+    "accounts/fireworks/models/qwen3-235b-a22b": ModelPricing(0.22, 0.88),
+    "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507": ModelPricing(0.22, 0.88),
+    "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507": ModelPricing(0.22, 0.88),
+    "accounts/fireworks/models/qwen3-30b-a3b": ModelPricing(0.15, 0.60),
+    "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct": ModelPricing(0.45, 1.80),
+    "accounts/fireworks/models/qwen3-coder-30b-a3b-instruct": ModelPricing(0.15, 0.60),
+    "accounts/fireworks/models/qwen3-8b": ModelPricing(0.20, 0.20),
+    # =========================================================================
+    # Qwen 2.5 VL (Vision-Language) Series
+    # =========================================================================
+    "accounts/fireworks/models/qwen2p5-vl-32b-instruct": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # Qwen3 VL Series (Vision-Language)
+    # =========================================================================
+    "accounts/fireworks/models/qwen3-vl-235b-a22b-instruct": ModelPricing(0.22, 0.88),
+    "accounts/fireworks/models/qwen3-vl-235b-a22b-thinking": ModelPricing(0.22, 0.88),
+    "accounts/fireworks/models/qwen3-vl-30b-a3b-instruct": ModelPricing(0.15, 0.60),
+    "accounts/fireworks/models/qwen3-vl-30b-a3b-thinking": ModelPricing(0.15, 0.60),
+    # =========================================================================
+    # DeepSeek Series
+    # =========================================================================
+    "accounts/fireworks/models/deepseek-v3-0324": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/deepseek-v3p1": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/deepseek-v3p1-terminus": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/deepseek-v3p2": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/deepseek-r1-0528": ModelPricing(1.35, 5.40),
+    # =========================================================================
+    # Mixtral (MoE) Series
+    # =========================================================================
+    "accounts/fireworks/models/mixtral-8x22b-instruct": ModelPricing(1.20, 1.20),  # MoE >56B
+    # =========================================================================
+    # GLM Series (Zhipu/THUDM)
+    # =========================================================================
+    "accounts/fireworks/models/glm-4p5": ModelPricing(0.55, 2.19),
+    "accounts/fireworks/models/glm-4p6": ModelPricing(0.55, 2.19),
+    "accounts/fireworks/models/glm-4p7": ModelPricing(0.55, 2.19),
+    # =========================================================================
+    # Kimi / Moonshot Series
+    # =========================================================================
+    "accounts/fireworks/models/kimi-k2-instruct-0905": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/kimi-k2-thinking": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # MiniMax Series
+    # =========================================================================
+    "accounts/fireworks/models/minimax-m2": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/minimax-m2p1": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # GPT-OSS (Open Source GPT-like models)
+    # =========================================================================
+    "accounts/fireworks/models/gpt-oss-20b": ModelPricing(0.90, 0.90),
+    "accounts/fireworks/models/gpt-oss-120b": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # Cogito Series
+    # =========================================================================
+    "accounts/cogito/models/cogito-671b-v2-p1": ModelPricing(0.90, 0.90),
+    # =========================================================================
+    # Image Generation Models (FLUX)
+    # =========================================================================
+    "accounts/fireworks/models/flux-1-dev-fp8": ModelPricing(0.0005, 0.0),  # per step
+    "accounts/fireworks/models/flux-1-schnell-fp8": ModelPricing(0.00035, 0.0),  # per step
+    "accounts/fireworks/models/flux-kontext-pro": ModelPricing(0.04, 0.0),  # per image
+    "accounts/fireworks/models/flux-kontext-max": ModelPricing(0.08, 0.0),  # per image
+    # =========================================================================
+    # Embedding Models
+    # Pricing: up to 150M=$0.008, 150M-350M=$0.016, Qwen3 8B=$0.10
+    # =========================================================================
+    "nomic-ai/nomic-embed-text-v1.5": ModelPricing(0.008, 0.0),
+    "nomic-ai/nomic-embed-text-v1": ModelPricing(0.008, 0.0),
+    "thenlper/gte-large": ModelPricing(0.016, 0.0),
+    "thenlper/gte-base": ModelPricing(0.008, 0.0),
+    "BAAI/bge-base-en-v1.5": ModelPricing(0.008, 0.0),
+    "BAAI/bge-small-en-v1.5": ModelPricing(0.008, 0.0),
+    "BAAI/bge-large-en-v1.5": ModelPricing(0.016, 0.0),
+    "WhereIsAI/UAE-Large-V1": ModelPricing(0.016, 0.0),
+    "mixedbread-ai/mxbai-embed-large-v1": ModelPricing(0.016, 0.0),
+    "sentence-transformers/all-MiniLM-L6-v2": ModelPricing(0.008, 0.0),
+    "accounts/fireworks/models/qwen3-embedding-8b": ModelPricing(0.10, 0.0),
+    # =========================================================================
+    # Reranker Models
+    # =========================================================================
+    "accounts/fireworks/models/qwen3-reranker-8b": ModelPricing(0.10, 0.0),
 }
 
 
@@ -317,16 +561,43 @@ DEEPSEEK_PRICING: dict[str, ModelPricing] = {
 # =============================================================================
 # Perplexity Pricing (USD per 1M tokens)
 # https://docs.perplexity.ai/guides/pricing
+# Note: Perplexity also charges per-request fees based on search_context_size:
+#   - High: $12/1K requests
+#   - Medium: $8/1K requests
+#   - Low: $5/1K requests
+# Last verified: 2026-01-08
 # =============================================================================
 
 PERPLEXITY_PRICING: dict[str, ModelPricing] = {
-    # Sonar Pro (online models)
-    "sonar-pro": ModelPricing(3.00, 15.00),
+    # =========================================================================
+    # Sonar Family (Search-Augmented Models)
+    # =========================================================================
+    # Sonar - Fast, efficient search (128K context)
     "sonar": ModelPricing(1.00, 1.00),
-    # Sonar Reasoning
-    "sonar-reasoning-pro": ModelPricing(2.00, 8.00),
+    # Sonar Pro - Advanced search with grounding (200K context, 8K output)
+    "sonar-pro": ModelPricing(3.00, 15.00),
+    # Sonar Pro Search - Latest advanced search variant
+    "sonar-pro-search": ModelPricing(3.00, 15.00),
+    # =========================================================================
+    # Sonar Reasoning Family
+    # =========================================================================
+    # Sonar Reasoning - Reasoning with web search (127K context)
     "sonar-reasoning": ModelPricing(1.00, 5.00),
-    # Legacy
+    # Sonar Reasoning Pro - Advanced reasoning (128K context)
+    "sonar-reasoning-pro": ModelPricing(2.00, 8.00),
+    # =========================================================================
+    # Sonar Deep Research
+    # =========================================================================
+    # Deep Research - Multi-source research (128K context)
+    "sonar-deep-research": ModelPricing(2.00, 8.00),
+    # =========================================================================
+    # Special/Experimental Models
+    # =========================================================================
+    # R1-1776 - Experimental reasoning model
+    "r1-1776": ModelPricing(2.00, 8.00),
+    # =========================================================================
+    # Legacy Models (may be deprecated)
+    # =========================================================================
     "llama-3.1-sonar-small-128k-online": ModelPricing(0.20, 0.20),
     "llama-3.1-sonar-large-128k-online": ModelPricing(1.00, 1.00),
     "llama-3.1-sonar-huge-128k-online": ModelPricing(5.00, 5.00),
@@ -408,7 +679,7 @@ def get_model_pricing(model: str) -> ModelPricing:
         )
 
     # Search all providers
-    for _prov, pricing_table in ALL_PRICING.items():
+    for pricing_table in ALL_PRICING.values():
         if model_name in pricing_table:
             return pricing_table[model_name]
 

@@ -7,9 +7,10 @@ Handles:
 - OpenAI-style streaming format
 
 Performance optimizations:
-- Pre-compiled constants to avoid repeated string creation
-- Minimized allocations in hot paths
-- Direct string operations instead of method calls where possible
+- Zero-copy parsing using bytearray + memoryview
+- Pre-compiled byte constants for hot path
+- Minimized allocations - only decode when yielding events
+- Direct byte operations instead of string methods
 """
 
 from __future__ import annotations
@@ -22,17 +23,23 @@ if TYPE_CHECKING:
 
 __all__ = ["AsyncSSEParser", "SSEEvent", "SSEParser"]
 
-# Pre-defined constants for hot path optimization
+# Pre-defined byte constants for zero-copy hot path
+_NEWLINE_B = ord("\n")
+_CARRIAGE_B = ord("\r")
+_COLON_B = ord(":")
+_SPACE_B = ord(" ")
+_DONE_MARKER_B = b"[DONE]"
+
+# String constants (for decoded output)
 _NEWLINE = "\n"
-_CARRIAGE_RETURN = "\r"
-_COLON = ":"
-_SPACE = " "
 _DONE_MARKER = "[DONE]"
 _DEFAULT_EVENT = "message"
-_FIELD_DATA = "data"
-_FIELD_EVENT = "event"
-_FIELD_ID = "id"
-_FIELD_RETRY = "retry"
+
+# Field markers as bytes for fast comparison
+_FIELD_DATA_B = b"data"
+_FIELD_EVENT_B = b"event"
+_FIELD_ID_B = b"id"
+_FIELD_RETRY_B = b"retry"
 
 
 class SSEEvent:
@@ -69,23 +76,32 @@ class SSEEvent:
 
 class SSEParser:
     """
-    Parser for Server-Sent Events stream.
+    Zero-copy SSE parser using bytearray + memoryview.
 
     Handles partial chunks and maintains state across calls.
 
-    Performance notes:
-    - Uses list for _current_data to avoid repeated string concatenation
-    - Minimizes allocations in the hot parsing path
-    - Uses string partition() which is faster than split() for single splits
+    Performance optimizations:
+    - bytearray buffer avoids string concatenation overhead
+    - memoryview for zero-copy line extraction
+    - Decodes bytes only when yielding events (lazy decode)
+    - Pre-computed byte constants for fast comparison
     """
 
-    __slots__ = ("_buffer", "_current_data", "_current_event", "_current_id", "_current_retry")
+    __slots__ = (
+        "_buffer",
+        "_current_data",
+        "_current_event",
+        "_current_id",
+        "_current_retry",
+        "_pos",
+    )
 
     def __init__(self) -> None:
-        self._buffer = ""
+        self._buffer = bytearray()
+        self._pos = 0  # Current parse position
         self._current_event = _DEFAULT_EVENT
-        self._current_data: list[str] = []
-        self._current_id: str | None = None
+        self._current_data: list[bytes] = []  # Store as bytes, decode on yield
+        self._current_id: bytes | None = None
         self._current_retry: int | None = None
 
     def feed(self, chunk: bytes | str) -> Iterator[SSEEvent]:
@@ -98,50 +114,73 @@ class SSEParser:
         Yields:
             SSEEvent for each complete event in the chunk
         """
-        # Fast path: decode bytes if needed
-        if isinstance(chunk, bytes):
-            chunk = chunk.decode("utf-8", errors="replace")
+        # Convert string to bytes if needed
+        if isinstance(chunk, str):
+            chunk = chunk.encode("utf-8")
 
-        # Append to buffer
-        self._buffer += chunk
+        # Extend buffer (efficient for bytearray)
+        self._buffer.extend(chunk)
+        buf_len = len(self._buffer)
 
-        # Process complete lines - use find() for speed
-        buffer = self._buffer
-        newline_pos = buffer.find(_NEWLINE)
+        # Collect events first, then yield (avoids memoryview lifetime issues)
+        events_to_yield: list[SSEEvent] = []
 
-        while newline_pos != -1:
-            # Extract line (strip \r if present)
-            line = buffer[:newline_pos]
-            if line.endswith(_CARRIAGE_RETURN):
+        while self._pos < buf_len:
+            # Find next newline
+            newline_pos = self._buffer.find(b"\n", self._pos)
+            if newline_pos == -1:
+                break
+
+            # Extract line as bytes using slice (bytearray slice returns bytes)
+            line = bytes(self._buffer[self._pos : newline_pos])
+
+            # Strip trailing \r if present
+            if line and line[-1] == _CARRIAGE_B:
                 line = line[:-1]
 
-            # Advance buffer
-            buffer = buffer[newline_pos + 1 :]
+            # Move position past the newline
+            self._pos = newline_pos + 1
 
             # Process the line
-            event = self._process_line(line)
+            event = self._process_line_bytes(line)
             if event is not None:
-                yield event
+                events_to_yield.append(event)
 
-            # Find next newline
-            newline_pos = buffer.find(_NEWLINE)
+        # Compact buffer: remove processed data
+        if self._pos > 0:
+            del self._buffer[: self._pos]
+            self._pos = 0
 
-        # Store remaining buffer
-        self._buffer = buffer
+        # Now yield all collected events
+        yield from events_to_yield
 
-    def _process_line(self, line: str) -> SSEEvent | None:
-        """Process a single line and return event if complete."""
+    def _process_line_bytes(self, line: bytes) -> SSEEvent | None:
+        """Process a single line (as bytes) and return event if complete."""
         # Empty line = dispatch event
         if not line:
             if self._current_data:
-                # Join data lines and create event
+                # Decode and join data lines
+                data_str = _NEWLINE.join(
+                    d.decode("utf-8", errors="replace") for d in self._current_data
+                )
+                event_str = (
+                    self._current_event
+                    if isinstance(self._current_event, str)
+                    else self._current_event.decode("utf-8", errors="replace")
+                )
+                id_str = (
+                    self._current_id.decode("utf-8", errors="replace")
+                    if self._current_id
+                    else None
+                )
+
                 event = SSEEvent(
-                    data=_NEWLINE.join(self._current_data),
-                    event=self._current_event,
-                    id=self._current_id,
+                    data=data_str,
+                    event=event_str,
+                    id=id_str,
                     retry=self._current_retry,
                 )
-                # Reset for next event - reuse list
+                # Reset for next event
                 self._current_data = []
                 self._current_event = _DEFAULT_EVENT
                 self._current_id = None
@@ -149,30 +188,30 @@ class SSEParser:
                 return event
             return None
 
-        # Comment line - fast check
-        if line[0] == _COLON:
+        # Comment line - fast byte check
+        if line[0] == _COLON_B:
             return None
 
-        # Parse field using partition (faster than split for single delimiter)
-        colon_pos = line.find(_COLON)
+        # Parse field:value using bytes.find
+        colon_pos = line.find(b":")
         if colon_pos != -1:
             field = line[:colon_pos]
             value = line[colon_pos + 1 :]
             # Remove single leading space if present
-            if value and value[0] == _SPACE:
+            if value and value[0] == _SPACE_B:
                 value = value[1:]
         else:
             field = line
-            value = ""
+            value = b""
 
         # Field dispatch - ordered by frequency in typical SSE streams
-        if field == _FIELD_DATA:
+        if field == _FIELD_DATA_B:
             self._current_data.append(value)
-        elif field == _FIELD_EVENT:
-            self._current_event = value
-        elif field == _FIELD_ID:
+        elif field == _FIELD_EVENT_B:
+            self._current_event = value.decode("utf-8", errors="replace")
+        elif field == _FIELD_ID_B:
             self._current_id = value
-        elif field == _FIELD_RETRY:
+        elif field == _FIELD_RETRY_B:
             with contextlib.suppress(ValueError):
                 self._current_retry = int(value)
 
@@ -180,19 +219,37 @@ class SSEParser:
 
     def flush(self) -> SSEEvent | None:
         """Flush any remaining buffered event."""
-        # First, process any remaining buffer content
-        if self._buffer:
-            line = self._buffer
-            if line.endswith(_CARRIAGE_RETURN):
-                line = line[:-1]
-            self._process_line(line)
-            self._buffer = ""
+        # Process any remaining buffer content
+        if self._pos < len(self._buffer):
+            remaining = bytes(self._buffer[self._pos :])
+            if remaining:
+                # Strip trailing \r if present
+                if remaining[-1] == _CARRIAGE_B:
+                    remaining = remaining[:-1]
+                self._process_line_bytes(remaining)
+
+        self._buffer.clear()
+        self._pos = 0
 
         if self._current_data:
+            data_str = _NEWLINE.join(
+                d.decode("utf-8", errors="replace") for d in self._current_data
+            )
+            event_str = (
+                self._current_event
+                if isinstance(self._current_event, str)
+                else self._current_event.decode("utf-8", errors="replace")
+            )
+            id_str = (
+                self._current_id.decode("utf-8", errors="replace")
+                if self._current_id
+                else None
+            )
+
             event = SSEEvent(
-                data=_NEWLINE.join(self._current_data),
-                event=self._current_event,
-                id=self._current_id,
+                data=data_str,
+                event=event_str,
+                id=id_str,
                 retry=self._current_retry,
             )
             self._current_data = []

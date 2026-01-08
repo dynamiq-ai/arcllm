@@ -7,13 +7,14 @@ and endpoint structure than AI Studio.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
+import orjson
+
 from arcllm.exceptions import (
-    AuthenticationError,
     ArcLLMError,
+    AuthenticationError,
 )
 from arcllm.providers.base import (
     ProviderConfig,
@@ -69,6 +70,7 @@ class VertexAIAdapter(GeminiAdapter):
 
                 result = subprocess.run(
                     ["gcloud", "auth", "print-access-token"],
+                    check=False,
                     capture_output=True,
                     text=True,
                     timeout=10,
@@ -160,7 +162,7 @@ class VertexAIAdapter(GeminiAdapter):
         if stream:
             url += "?alt=sse"
 
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -190,7 +192,7 @@ class VertexAIAdapter(GeminiAdapter):
 
         url = f"{self._api_base}/projects/{project}/locations/{self._location}/publishers/google/models/{model}:predict"
 
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",

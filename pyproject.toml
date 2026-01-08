@@ -27,10 +27,19 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# ZERO runtime dependencies - stdlib only
-dependencies = []
+# Minimal runtime dependencies for maximum performance
+dependencies = [
+    "httpx[http2]>=0.27.0",  # Sync HTTP client with connection pooling & HTTP/2
+    "aiohttp>=3.10.0",       # Async HTTP client - faster than httpx for async
+    "msgspec>=0.18.0",       # Fast structs & JSON (2.7x faster object creation)
+    "orjson>=3.10.0",        # Fast JSON for request bodies
+]
 
 [project.optional-dependencies]
+# Performance extras (optional)
+performance = [
+    "uvloop>=0.19.0; sys_platform != 'win32'",  # Faster event loop (Unix only)
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -67,10 +76,48 @@ select = [
     "SIM",    # flake8-simplify
     "TCH",    # flake8-type-checking
     "RUF",    # ruff-specific rules
+    "ANN",    # flake8-annotations - ENFORCE TYPE ANNOTATIONS
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib
+    "PL",     # pylint
+    "PERF",   # perflint - performance anti-patterns
+    "FURB",   # refurb - modern Python
+    "LOG",    # flake8-logging
+    "RET",    # flake8-return
+    "SLF",    # flake8-self
+    "SLOT",   # flake8-slots - enforce __slots__ in classes
+    "T20",    # flake8-print - no print statements in library code
 ]
 ignore = [
-    "E501",   # line too long (handled by formatter)
-    "B008",   # function call in default argument
+    "E501",    # line too long (handled by formatter)
+    "B008",    # function call in default argument
+    "ANN401",  # dynamically typed expressions (Any) - needed for LLM APIs
+    "ARG001",  # unused function argument - kept for API compatibility
+    "ARG002",  # unused method argument - required for interface compatibility
+    "PERF401", # use list comprehension - explicit loops can be clearer
+    "PLR0911", # too many returns - error mapping has many cases
+    "PLR0912", # too many branches - complex parsing logic is OK
+    "PLR0913", # too many arguments - LLM APIs have many params
+    "PLR0915", # too many statements - complex functions are OK
+    "PLR2004", # magic values - acceptable in tests  
+    "PLW0603", # global statement - needed for connection pooling singletons
+    "PLC0415", # import not at top - we use lazy imports for performance
+    "RET504",  # unnecessary variable before return - can improve readability
+    "SLF001",  # private member access - needed for testing
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "ANN",     # Don't require annotations in tests
+    "ARG",     # Unused args OK in tests (fixtures)
+    "PLR",     # Don't care about complexity in tests
+    "T20",     # Print OK in tests
+    "SLF001",  # Private access OK in tests
+]
+"benchmarks/*" = [
+    "ANN",     # Don't require annotations in benchmarks
+    "T20",     # Print OK in benchmarks
+    "PLR",     # Complexity OK in benchmarks
 ]
 
 [tool.ruff.lint.isort]
@@ -96,6 +143,17 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 filterwarnings = [
     "ignore::DeprecationWarning",
+]
+# CI/CD markers for filtering tests
+markers = [
+    "smoke: Quick smoke tests for CI/CD validation",
+    "slow: Slow tests that may be skipped in CI",
+    "integration: All integration tests requiring live API keys",
+    "openai: OpenAI-specific tests",
+    "anthropic: Anthropic-specific tests",
+    "groq: Groq-specific tests",
+    "together_ai: Together AI-specific tests",
+    "mistral: Mistral-specific tests",
 ]
 
 [tool.coverage.run]

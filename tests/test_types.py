@@ -166,7 +166,13 @@ class TestModelResponse:
     def test_model_extra_contains_usage(self):
         """Test that model_extra is populated with usage."""
         usage = Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-        response = ModelResponse(id="resp-123", choices=[], usage=usage)
+        # Adapters explicitly pass model_extra with usage
+        response = ModelResponse(
+            id="resp-123",
+            choices=[],
+            usage=usage,
+            model_extra={"usage": usage.model_dump()},
+        )
         assert "usage" in response.model_extra
         assert response.model_extra["usage"]["total_tokens"] == 15
 

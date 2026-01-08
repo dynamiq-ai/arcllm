@@ -28,7 +28,7 @@ class TogetherAdapter(OpenAIAdapter):
         super().__init__(config)
         self._api_base = config.api_base or "https://api.together.xyz/v1"
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers."""
         api_key = self._get_api_key("TOGETHER_API_KEY")
         headers = {

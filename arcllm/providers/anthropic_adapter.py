@@ -6,17 +6,71 @@ Anthropic uses a different API format than OpenAI:
 - Different message format (system separate from messages)
 - Different tool calling format
 - Different streaming format (SSE with different event types)
+
+=============================================================================
+OFFICIAL API DOCUMENTATION REFERENCES (for AI coding agents)
+=============================================================================
+
+Main API Documentation:
+    https://docs.anthropic.com/en/api
+
+Messages API (main endpoint):
+    https://docs.anthropic.com/en/api/messages
+    - POST /v1/messages
+    - Required fields: model, messages, max_tokens
+    - Optional: system, temperature, top_p, stop_sequences, stream, tools, etc.
+
+Streaming:
+    https://docs.anthropic.com/en/api/messages-streaming
+    - Event types: message_start, content_block_start, content_block_delta,
+                   message_delta, message_stop
+    - SSE format with event/data pairs
+
+Tool Use (Function Calling):
+    https://docs.anthropic.com/en/docs/build-with-claude/tool-use
+    - Tools defined with name, description, input_schema
+    - Tool results sent as user messages with tool_result content type
+    - Tool choice: auto, any, tool (specific)
+
+Vision:
+    https://docs.anthropic.com/en/docs/build-with-claude/vision
+    - Images sent as content blocks with type "image"
+    - Supports base64 and URL sources
+    - Media types: image/jpeg, image/png, image/gif, image/webp
+
+Models & Pricing:
+    https://docs.anthropic.com/en/docs/about-claude/models
+    https://www.anthropic.com/pricing
+
+API Versioning:
+    https://docs.anthropic.com/en/api/versioning
+    - Current stable: 2023-06-01
+    - Set via anthropic-version header
+
+Error Handling:
+    https://docs.anthropic.com/en/api/errors
+    - 400: invalid_request_error
+    - 401: authentication_error
+    - 404: not_found_error
+    - 429: rate_limit_error
+    - 500+: api_error
+
+Changelog (check for API updates):
+    https://docs.anthropic.com/en/release-notes/api
+
+=============================================================================
 """
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
+import orjson
+
 from arcllm.exceptions import (
-    AuthenticationError,
     ArcLLMError,
+    AuthenticationError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
@@ -63,7 +117,7 @@ class AnthropicAdapter(BaseAdapter):
         self._api_base = config.api_base or "https://api.anthropic.com"
         self._api_version = config.api_version or "2023-06-01"
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers."""
         api_key = self._get_api_key("ANTHROPIC_API_KEY")
         headers = {
@@ -121,7 +175,7 @@ class AnthropicAdapter(BaseAdapter):
                             "type": "tool_use",
                             "id": tc.get("id", ""),
                             "name": func.get("name", ""),
-                            "input": json.loads(func.get("arguments", "{}")),
+                            "input": orjson.loads(func.get("arguments", "{}")),
                         }
                         content_blocks.append(tool_use)
                     anthropic_messages.append({"role": "assistant", "content": content_blocks})
@@ -268,7 +322,7 @@ class AnthropicAdapter(BaseAdapter):
                     body["tool_choice"] = {"type": "tool", "name": tc["function"]["name"]}
 
         url = f"{self._api_base}/v1/messages"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -281,8 +335,8 @@ class AnthropicAdapter(BaseAdapter):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse Anthropic messages response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse response JSON: {e}",
                 provider=self.provider_name,
@@ -293,15 +347,18 @@ class AnthropicAdapter(BaseAdapter):
 
     def _build_model_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Build ModelResponse from Anthropic response."""
+        # Cache timestamp once for this response
+        now = int(time.time())
         content_blocks = resp.get("content", [])
 
         # Extract text content and tool uses
-        text_content = ""
+        # Use list + join for efficient string building
+        text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
 
         for block in content_blocks:
             if block.get("type") == "text":
-                text_content += block.get("text", "")
+                text_parts.append(block.get("text", ""))
             elif block.get("type") == "tool_use":
                 tool_calls.append(
                     ToolCall(
@@ -309,14 +366,17 @@ class AnthropicAdapter(BaseAdapter):
                         type="function",
                         function=FunctionCall(
                             name=block.get("name", ""),
-                            arguments=json.dumps(block.get("input", {})),
+                            arguments=orjson.dumps(block.get("input", {})).decode(),
                         ),
                     )
                 )
 
+        # Join text parts efficiently
+        text_content = "".join(text_parts) if text_parts else None
+
         message = Message(
             role=resp.get("role", "assistant"),
-            content=text_content if text_content else None,
+            content=text_content,
             tool_calls=tool_calls if tool_calls else None,
         )
 
@@ -346,7 +406,7 @@ class AnthropicAdapter(BaseAdapter):
         return ModelResponse(
             id=resp.get("id", ""),
             object="chat.completion",
-            created=int(time.time()),
+            created=now,
             model=resp.get("model", model),
             choices=[choice],
             usage=usage,
@@ -360,11 +420,13 @@ class AnthropicAdapter(BaseAdapter):
             return None
 
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError:
+            event = orjson.loads(data)
+        except orjson.JSONDecodeError:
             # Anthropic sometimes sends non-JSON events
             return None
 
+        # Cache timestamp once for this event
+        now = int(time.time())
         event_type = event.get("type", "")
 
         # Handle different event types
@@ -374,7 +436,7 @@ class AnthropicAdapter(BaseAdapter):
             return StreamChunk(
                 id=message.get("id", ""),
                 object="chat.completion.chunk",
-                created=int(time.time()),
+                created=now,
                 model=message.get("model", model),
                 choices=[
                     ChunkChoice(
@@ -385,7 +447,7 @@ class AnthropicAdapter(BaseAdapter):
                 ],
             )
 
-        elif event_type == "content_block_start":
+        if event_type == "content_block_start":
             block = event.get("content_block", {})
             if block.get("type") == "text":
                 return StreamChunk(
@@ -399,7 +461,7 @@ class AnthropicAdapter(BaseAdapter):
                         )
                     ],
                 )
-            elif block.get("type") == "tool_use":
+            if block.get("type") == "tool_use":
                 # Start of tool use
                 return StreamChunk(
                     id="",
@@ -439,7 +501,7 @@ class AnthropicAdapter(BaseAdapter):
                         )
                     ],
                 )
-            elif delta.get("type") == "input_json_delta":
+            if delta.get("type") == "input_json_delta":
                 # Tool argument delta
                 return StreamChunk(
                     id="",
@@ -510,11 +572,11 @@ class AnthropicAdapter(BaseAdapter):
     ) -> ArcLLMError:
         """Parse Anthropic error response."""
         try:
-            error_data = json.loads(data.decode("utf-8"))
+            error_data = orjson.loads(data)
             error = error_data.get("error", {})
             message = error.get("message", "Unknown error")
             error_type = error.get("type", "")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
             error_type = ""
 
@@ -525,35 +587,34 @@ class AnthropicAdapter(BaseAdapter):
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 429:
+        if status_code == 429:
             return RateLimitError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 400:
+        if status_code == 400:
             return InvalidRequestError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 404:
+        if status_code == 404:
             return UnsupportedModelError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        else:
-            return ProviderAPIError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-                error_type=error_type,
-            )
+        return ProviderAPIError(
+            message,
+            provider=self.provider_name,
+            status_code=status_code,
+            request_id=request_id,
+            error_type=error_type,
+        )
 
     def build_embedding_request(
         self,

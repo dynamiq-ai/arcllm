@@ -35,7 +35,7 @@ class PerplexityAdapter(OpenAIAdapter):
         super().__init__(config)
         self._api_base = config.api_base or "https://api.perplexity.ai"
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers."""
         api_key = self._get_api_key("PERPLEXITY_API_KEY")
         headers = {

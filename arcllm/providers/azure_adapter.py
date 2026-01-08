@@ -7,13 +7,14 @@ authentication and endpoint structure.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
+import orjson
+
 from arcllm.exceptions import (
-    AuthenticationError,
     ArcLLMError,
+    AuthenticationError,
 )
 from arcllm.providers.base import (
     ProviderConfig,
@@ -55,7 +56,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             )
         return base.rstrip("/")
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers for Azure."""
         headers = {"Content-Type": "application/json"}
 
@@ -145,7 +146,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         deployment = self._get_deployment(model)
         url = f"{api_base}/openai/deployments/{deployment}/chat/completions?api-version={self._api_version}"
 
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -182,7 +183,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
             f"{api_base}/openai/deployments/{deployment}/embeddings?api-version={self._api_version}"
         )
 
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",

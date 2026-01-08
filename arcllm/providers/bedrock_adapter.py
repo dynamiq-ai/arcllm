@@ -13,15 +13,16 @@ from __future__ import annotations
 import datetime
 import hashlib
 import hmac
-import json
 import os
 import time
 from typing import Any
 from urllib.parse import quote, urlparse
 
+import orjson
+
 from arcllm.exceptions import (
-    AuthenticationError,
     ArcLLMError,
+    AuthenticationError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
@@ -191,15 +192,15 @@ class BedrockAdapter(BaseAdapter):
         model_lower = model.lower()
         if "anthropic" in model_lower or "claude" in model_lower:
             return "anthropic"
-        elif "meta" in model_lower or "llama" in model_lower:
+        if "meta" in model_lower or "llama" in model_lower:
             return "meta"
-        elif "amazon" in model_lower or "titan" in model_lower:
+        if "amazon" in model_lower or "titan" in model_lower:
             return "amazon"
-        elif "cohere" in model_lower:
+        if "cohere" in model_lower:
             return "cohere"
-        elif "mistral" in model_lower:
+        if "mistral" in model_lower:
             return "mistral"
-        elif "ai21" in model_lower:
+        if "ai21" in model_lower:
             return "ai21"
         return "anthropic"  # Default
 
@@ -310,7 +311,7 @@ class BedrockAdapter(BaseAdapter):
         endpoint = "invoke-with-response-stream" if stream else "invoke"
 
         url = f"{self._api_base}/model/{model}/{endpoint}"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         headers = self._sign_request("POST", url, {"Content-Type": "application/json"}, body_bytes)
 
@@ -325,8 +326,8 @@ class BedrockAdapter(BaseAdapter):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse Bedrock response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse response JSON: {e}",
                 provider=self.provider_name,
@@ -337,20 +338,22 @@ class BedrockAdapter(BaseAdapter):
 
         if model_family == "anthropic":
             return self._parse_anthropic_response(resp, model)
-        else:
-            # Generic parsing
-            return self._parse_generic_response(resp, model)
+        # Generic parsing
+        return self._parse_generic_response(resp, model)
 
     def _parse_anthropic_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Parse Anthropic Claude response from Bedrock."""
+        # Cache timestamp once for this response
+        now = int(time.time())
         content_blocks = resp.get("content", [])
 
-        text_content = ""
+        # Use list + join for efficient string building
+        text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
 
         for block in content_blocks:
             if block.get("type") == "text":
-                text_content += block.get("text", "")
+                text_parts.append(block.get("text", ""))
             elif block.get("type") == "tool_use":
                 tool_calls.append(
                     ToolCall(
@@ -358,14 +361,15 @@ class BedrockAdapter(BaseAdapter):
                         type="function",
                         function=FunctionCall(
                             name=block.get("name", ""),
-                            arguments=json.dumps(block.get("input", {})),
+                            arguments=orjson.dumps(block.get("input", {})).decode(),
                         ),
                     )
                 )
 
+        text_content = "".join(text_parts) if text_parts else None
         message = Message(
             role="assistant",
-            content=text_content if text_content else None,
+            content=text_content,
             tool_calls=tool_calls if tool_calls else None,
         )
 
@@ -386,9 +390,9 @@ class BedrockAdapter(BaseAdapter):
         )
 
         return ModelResponse(
-            id=resp.get("id", f"bedrock-{int(time.time())}"),
+            id=resp.get("id", f"bedrock-{now}"),
             object="chat.completion",
-            created=int(time.time()),
+            created=now,
             model=model,
             choices=[Choice(index=0, message=message, finish_reason=finish_reason)],
             usage=usage,
@@ -397,6 +401,8 @@ class BedrockAdapter(BaseAdapter):
 
     def _parse_generic_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Parse generic model response."""
+        # Cache timestamp once for this response
+        now = int(time.time())
         content = (
             resp.get("generation", "") or resp.get("outputText", "") or resp.get("completion", "")
         )
@@ -404,9 +410,9 @@ class BedrockAdapter(BaseAdapter):
         message = Message(role="assistant", content=content)
 
         return ModelResponse(
-            id=f"bedrock-{int(time.time())}",
+            id=f"bedrock-{now}",
             object="chat.completion",
-            created=int(time.time()),
+            created=now,
             model=model,
             choices=[Choice(index=0, message=message, finish_reason="stop")],
             usage=Usage(),
@@ -420,8 +426,8 @@ class BedrockAdapter(BaseAdapter):
             return None
 
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError:
+            event = orjson.loads(data)
+        except orjson.JSONDecodeError:
             return None
 
         # Bedrock streaming format varies by model
@@ -429,8 +435,7 @@ class BedrockAdapter(BaseAdapter):
 
         if model_family == "anthropic":
             return self._parse_anthropic_stream_event(event, model)
-        else:
-            return self._parse_generic_stream_event(event, model)
+        return self._parse_generic_stream_event(event, model)
 
     def _parse_anthropic_stream_event(
         self, event: dict[str, Any], model: str
@@ -451,7 +456,7 @@ class BedrockAdapter(BaseAdapter):
                 ],
             )
 
-        elif event_type == "content_block_delta":
+        if event_type == "content_block_delta":
             delta = event.get("delta", {})
             if delta.get("type") == "text_delta":
                 return StreamChunk(
@@ -465,7 +470,7 @@ class BedrockAdapter(BaseAdapter):
                         )
                     ],
                 )
-            elif delta.get("type") == "input_json_delta":
+            if delta.get("type") == "input_json_delta":
                 return StreamChunk(
                     id="",
                     model=model,
@@ -549,46 +554,45 @@ class BedrockAdapter(BaseAdapter):
     ) -> ArcLLMError:
         """Parse Bedrock error response."""
         try:
-            error_data = json.loads(data.decode("utf-8"))
+            error_data = orjson.loads(data)
             message = error_data.get("message", "Unknown error")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
 
-        if status_code == 401 or status_code == 403:
+        if status_code in {401, 403}:
             return AuthenticationError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 429:
+        if status_code == 429:
             return RateLimitError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 400:
+        if status_code == 400:
             return InvalidRequestError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        elif status_code == 404:
+        if status_code == 404:
             return UnsupportedModelError(
                 message,
                 provider=self.provider_name,
                 status_code=status_code,
                 request_id=request_id,
             )
-        else:
-            return ProviderAPIError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+        return ProviderAPIError(
+            message,
+            provider=self.provider_name,
+            status_code=status_code,
+            request_id=request_id,
+        )
 
     def build_embedding_request(
         self,
@@ -604,7 +608,7 @@ class BedrockAdapter(BaseAdapter):
         }
 
         url = f"{self._api_base}/model/{model}/invoke"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         headers = self._sign_request("POST", url, {"Content-Type": "application/json"}, body_bytes)
 
@@ -619,8 +623,8 @@ class BedrockAdapter(BaseAdapter):
     def parse_embedding_response(self, data: bytes, model: str) -> EmbeddingResponse:
         """Parse Bedrock embedding response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse embedding response: {e}",
                 provider=self.provider_name,

@@ -6,10 +6,11 @@ Ollama provides a local LLM server with an OpenAI-compatible API.
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Any
+
+import orjson
 
 from arcllm.exceptions import (
     ArcLLMError,
@@ -72,7 +73,7 @@ class OllamaAdapter(BaseAdapter):
         base = config.api_base or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self._api_base = base.rstrip("/")
 
-    def _get_headers(self) -> dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         """Get request headers (no auth required for local Ollama)."""
         headers = {"Content-Type": "application/json"}
         if self.config.extra_headers:
@@ -133,7 +134,7 @@ class OllamaAdapter(BaseAdapter):
                 body["format"] = "json"
 
         url = f"{self._api_base}/v1/chat/completions"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -146,13 +147,16 @@ class OllamaAdapter(BaseAdapter):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse Ollama chat response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse response JSON: {e}",
                 provider=self.provider_name,
                 raw_data=data,
             ) from e
+
+        # Cache timestamp once for this response
+        now = int(time.time())
 
         # Ollama uses OpenAI-compatible format
         choices: list[Choice] = []
@@ -201,9 +205,9 @@ class OllamaAdapter(BaseAdapter):
             )
 
         return ModelResponse(
-            id=resp.get("id", f"ollama-{int(time.time())}"),
+            id=resp.get("id", f"ollama-{now}"),
             object="chat.completion",
-            created=resp.get("created", int(time.time())),
+            created=resp.get("created", now),
             model=resp.get("model", model),
             choices=choices,
             usage=usage,
@@ -217,10 +221,12 @@ class OllamaAdapter(BaseAdapter):
             return None
 
         try:
-            event = json.loads(data)
-        except json.JSONDecodeError:
+            event = orjson.loads(data)
+        except orjson.JSONDecodeError:
             return None
 
+        # Cache timestamp once for this event
+        now = int(time.time())
         choices: list[ChunkChoice] = []
         for choice_data in event.get("choices", []):
             delta_data = choice_data.get("delta", {})
@@ -247,7 +253,7 @@ class OllamaAdapter(BaseAdapter):
         return StreamChunk(
             id=event.get("id", ""),
             object="chat.completion.chunk",
-            created=event.get("created", int(time.time())),
+            created=event.get("created", now),
             model=event.get("model", model),
             choices=choices,
         )
@@ -260,9 +266,9 @@ class OllamaAdapter(BaseAdapter):
     ) -> ArcLLMError:
         """Parse Ollama error response."""
         try:
-            error_data = json.loads(data.decode("utf-8"))
+            error_data = orjson.loads(data)
             message = error_data.get("error", "Unknown error")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
 
         return ProviderAPIError(
@@ -287,7 +293,7 @@ class OllamaAdapter(BaseAdapter):
         }
 
         url = f"{self._api_base}/v1/embeddings"
-        body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        body_bytes = orjson.dumps(body)
 
         return RequestData(
             method="POST",
@@ -300,8 +306,8 @@ class OllamaAdapter(BaseAdapter):
     def parse_embedding_response(self, data: bytes, model: str) -> EmbeddingResponse:
         """Parse Ollama embedding response."""
         try:
-            resp = json.loads(data.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
             raise ResponseParseError(
                 f"Failed to parse embedding response: {e}",
                 provider=self.provider_name,

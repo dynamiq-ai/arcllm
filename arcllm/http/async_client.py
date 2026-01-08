@@ -1,27 +1,29 @@
 """
-Asynchronous HTTP client using stdlib asyncio.
+Asynchronous HTTP client using aiohttp.
 
 Features:
-- True async I/O (no blocking)
-- TLS support
+- True async I/O with connection pooling
+- Optimized for high-concurrency scenarios
+- TLS support with connection reuse
 - Timeout handling
 - Streaming response support
-- Retries with exponential backoff and jitter
+- Automatic retries
+
+aiohttp is used for async operations as it provides better performance
+for concurrent requests compared to httpx in async contexts.
+See: https://webscrapingsite.com/resources/httpx-vs-requests-vs-aiohttp/
 """
 
 from __future__ import annotations
 
 import asyncio
-import builtins
-import contextlib
-import gzip
-import json
-import random
+import os
 import ssl
-import zlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+
+import aiohttp
+import orjson
 
 from arcllm.exceptions import (
     ConnectionError,
@@ -45,8 +47,8 @@ class AsyncHTTPResponse:
     request_id: str | None = None
 
     def json(self) -> Any:
-        """Parse response body as JSON."""
-        return json.loads(self.body.decode("utf-8"))
+        """Parse response body as JSON using orjson (fast)."""
+        return orjson.loads(self.body)
 
     @property
     def text(self) -> str:
@@ -56,17 +58,31 @@ class AsyncHTTPResponse:
 
 class AsyncHTTPClient:
     """
-    Asynchronous HTTP client using asyncio streams.
+    Asynchronous HTTP client with connection pooling.
 
-    Uses low-level asyncio.open_connection for true async I/O.
+    Uses aiohttp for high-performance async HTTP handling with connection reuse.
+    aiohttp is specifically designed for async operations and provides:
+    - Lower overhead per request
+    - Better connection pooling
+    - Optimized for high concurrency
+
+    Note: aiohttp objects are created lazily since they require an event loop.
+
+    Performance optimizations:
+    - SSL context cached (avoid repeated creation)
+    - Default timeout object cached (avoid repeated creation)
+    - skip_auto_headers for reduced overhead
     """
 
     __slots__ = (
         "_connect_timeout",
+        "_connector",
+        "_default_timeout",
         "_max_retries",
-        "_retry_delay",
+        "_proxy",
+        "_session",
         "_ssl_context",
-        "_timeout",
+        "_timeout_seconds",
     )
 
     def __init__(
@@ -75,141 +91,93 @@ class AsyncHTTPClient:
         timeout: float = 60.0,
         connect_timeout: float = 10.0,
         max_retries: int = 3,
-        retry_delay: float = 1.0,
-        ssl_context: ssl.SSLContext | None = None,
     ) -> None:
-        self._timeout = timeout
+        """
+        Initialize async HTTP client.
+
+        Args:
+            timeout: Total request timeout in seconds
+            connect_timeout: Connection timeout in seconds
+            max_retries: Maximum number of retry attempts
+        """
+        # Store timeout values for lazy initialization
+        self._timeout_seconds = timeout
         self._connect_timeout = connect_timeout
         self._max_retries = max_retries
-        self._retry_delay = retry_delay
-        self._ssl_context = ssl_context or ssl.create_default_context()
 
-    def _parse_url(self, url: str) -> tuple[str, int, str, bool]:
-        """Parse URL into components."""
-        parsed = urlparse(url)
-        is_https = parsed.scheme == "https"
-        host = parsed.hostname or ""
-        port = parsed.port or (443 if is_https else 80)
-        path = parsed.path or "/"
-        if parsed.query:
-            path = f"{path}?{parsed.query}"
-        return host, port, path, is_https
+        # Check for proxy (cached at init, not per-request)
+        self._proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
 
-    def _build_request(
-        self,
-        method: str,
-        host: str,
-        path: str,
-        headers: dict[str, str],
-        body: bytes | None,
-    ) -> bytes:
-        """Build HTTP/1.1 request bytes."""
-        lines = [f"{method} {path} HTTP/1.1"]
-        headers["Host"] = host
-        if "Accept-Encoding" not in headers:
-            headers["Accept-Encoding"] = "gzip, deflate"
-        if "Connection" not in headers:
-            headers["Connection"] = "close"
-        if body and "Content-Length" not in headers:
-            headers["Content-Length"] = str(len(body))
+        # Cache SSL context with optimized settings (expensive to create, reusable)
+        self._ssl_context = ssl.create_default_context()
+        # Optimize SSL handshake performance (matching litellm)
+        self._ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        # Use optimized cipher ordering (fast ciphers first)
+        try:
+            self._ssl_context.set_ciphers(
+                "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
+                ":ECDH+AESGCM:DH+AESGCM:ECDH+AES:DH+AES:RSA+AESGCM:RSA+AES:!aNULL"
+                ":!eNULL:!MD5:!DSS"
+            )
+        except ssl.SSLError:
+            # Fallback to default ciphers if custom ones aren't supported
+            pass
 
-        for key, value in headers.items():
-            lines.append(f"{key}: {value}")
-        lines.append("")
-        lines.append("")
+        # Cache default timeout object (avoid recreation per request)
+        self._default_timeout = aiohttp.ClientTimeout(
+            total=timeout,
+            connect=connect_timeout,
+            sock_read=timeout,
+        )
 
-        request = "\r\n".join(lines).encode("utf-8")
-        if body:
-            request += body
-        return request
+        # These are created lazily when first used (require event loop)
+        self._connector: aiohttp.TCPConnector | None = None
+        self._session: aiohttp.ClientSession | None = None
 
-    async def _read_response_headers(
-        self, reader: asyncio.StreamReader
-    ) -> tuple[int, dict[str, str]]:
-        """Read and parse HTTP response headers."""
-        # Read status line
-        status_line_bytes = await reader.readline()
-        if not status_line_bytes:
-            raise ConnectionError("Empty response from server")
+    def _get_timeout(self, timeout: float | None = None) -> aiohttp.ClientTimeout:
+        """Get timeout object, using cached default if no custom timeout."""
+        if timeout is None:
+            return self._default_timeout
+        # Create custom timeout only when needed
+        return aiohttp.ClientTimeout(
+            total=timeout,
+            connect=self._connect_timeout,
+            sock_read=timeout,
+        )
 
-        status_line = status_line_bytes.decode("utf-8", errors="replace").strip()
-        parts = status_line.split(" ", 2)
-        if len(parts) < 2:
-            raise ConnectionError(f"Invalid status line: {status_line}")
-        status_code = int(parts[1])
+    def _create_connector(self) -> aiohttp.TCPConnector:
+        """
+        Create a TCP connector with optimized connection pooling.
 
-        # Read headers
-        headers: dict[str, str] = {}
-        while True:
-            line_bytes = await reader.readline()
-            if not line_bytes or line_bytes == b"\r\n" or line_bytes == b"\n":
-                break
-            line = line_bytes.decode("utf-8", errors="replace").strip()
-            if ":" in line:
-                key, value = line.split(":", 1)
-                headers[key.strip().lower()] = value.strip()
+        Settings match litellm's aggressive configuration for LLM APIs:
+        - High connection limits for concurrent requests
+        - Long keepalive to reuse connections across requests
+        - DNS caching to avoid repeated lookups
+        - Cached SSL context (created once at init)
+        """
+        return aiohttp.TCPConnector(
+            limit=300,  # Max total connections (litellm uses 300)
+            limit_per_host=50,  # Max connections per host (litellm uses 50)
+            keepalive_timeout=120.0,  # 2 min keepalive (litellm uses 120)
+            ttl_dns_cache=300,  # DNS cache for 5 min (litellm uses 300)
+            enable_cleanup_closed=True,  # Clean up closed connections
+            ssl=self._ssl_context,  # Use cached SSL context
+        )
 
-        return status_code, headers
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        """Ensure session exists and is open."""
+        if self._session is None or self._session.closed:
+            # Create connector if needed
+            if self._connector is None or self._connector.closed:
+                self._connector = self._create_connector()
 
-    def _decompress(self, data: bytes, encoding: str | None) -> bytes:
-        """Decompress response body if needed."""
-        if not encoding:
-            return data
-        encoding = encoding.lower()
-        if encoding == "gzip":
-            return gzip.decompress(data)
-        elif encoding == "deflate":
-            try:
-                return zlib.decompress(data)
-            except zlib.error:
-                return zlib.decompress(data, -zlib.MAX_WBITS)
-        return data
-
-    async def _read_body(
-        self,
-        reader: asyncio.StreamReader,
-        headers: dict[str, str],
-    ) -> bytes:
-        """Read response body based on headers."""
-        # Check for chunked transfer encoding
-        transfer_encoding = headers.get("transfer-encoding", "").lower()
-        if "chunked" in transfer_encoding:
-            return await self._read_chunked_body(reader)
-
-        # Check for content-length
-        content_length = headers.get("content-length")
-        if content_length:
-            return await reader.readexactly(int(content_length))
-
-        # Read until EOF
-        return await reader.read()
-
-    async def _read_chunked_body(self, reader: asyncio.StreamReader) -> bytes:
-        """Read chunked transfer encoding body."""
-        body = bytearray()
-        while True:
-            # Read chunk size line
-            size_line = await reader.readline()
-            size_str = size_line.decode("utf-8").strip()
-            if not size_str:
-                continue
-            # Handle chunk extensions (after semicolon)
-            if ";" in size_str:
-                size_str = size_str.split(";")[0]
-            chunk_size = int(size_str, 16)
-
-            if chunk_size == 0:
-                # Read trailing CRLF
-                await reader.readline()
-                break
-
-            # Read chunk data
-            chunk = await reader.readexactly(chunk_size)
-            body.extend(chunk)
-            # Read trailing CRLF
-            await reader.readline()
-
-        return bytes(body)
+            self._session = aiohttp.ClientSession(
+                connector=self._connector,
+                timeout=self._default_timeout,  # Use cached default timeout
+                # Skip auto headers for performance
+                skip_auto_headers={"User-Agent"},
+            )
+        return self._session
 
     async def request(
         self,
@@ -235,151 +203,77 @@ class AsyncHTTPClient:
         Returns:
             AsyncHTTPResponse for non-streaming, AsyncIterator[bytes] for streaming
         """
-        host, port, path, is_https = self._parse_url(url)
-        request_headers = dict(headers) if headers else {}
-        timeout = timeout or self._timeout
-
+        session = await self._ensure_session()
         last_error: Exception | None = None
 
-        for attempt in range(self._max_retries):
-            reader: asyncio.StreamReader | None = None
-            writer: asyncio.StreamWriter | None = None
+        # Get timeout (uses cached default if no custom timeout)
+        request_timeout = self._get_timeout(timeout)
+
+        for _attempt in range(self._max_retries):
             try:
-                # Connect with timeout
-                ssl_ctx = self._ssl_context if is_https else None
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port, ssl=ssl_ctx),
-                    timeout=self._connect_timeout,
-                )
-                # Assertions for type narrowing - these are guaranteed after successful open_connection
-                assert reader is not None
-                assert writer is not None
-
-                # Send request
-                request_bytes = self._build_request(method, host, path, request_headers, body)
-                writer.write(request_bytes)
-                await writer.drain()
-
-                # Read response headers
-                status_code, resp_headers = await asyncio.wait_for(
-                    self._read_response_headers(reader),
-                    timeout=timeout,
-                )
-
-                request_id = resp_headers.get("x-request-id") or resp_headers.get("request-id")
-
                 if stream:
-                    # Return async streaming iterator
-                    return self._stream_response_async(reader, writer, resp_headers)
+                    return self._stream_request(
+                        session, method, url, headers, body, request_timeout
+                    )
 
-                # Read full body
-                response_body = await asyncio.wait_for(
-                    self._read_body(reader, resp_headers),
-                    timeout=timeout,
-                )
+                async with session.request(
+                    method,
+                    url,
+                    headers=headers,
+                    data=body,
+                    timeout=request_timeout,
+                    proxy=self._proxy,
+                ) as response:
+                    # Read body
+                    response_body = await response.read()
 
-                # Decompress if needed
-                content_encoding = resp_headers.get("content-encoding")
-                response_body = self._decompress(response_body, content_encoding)
+                    # Extract request ID
+                    request_id = response.headers.get(
+                        "x-request-id"
+                    ) or response.headers.get("request-id")
 
-                # Close connection
-                writer.close()
-                await writer.wait_closed()
+                    return AsyncHTTPResponse(
+                        status_code=response.status,
+                        headers=dict(response.headers),
+                        body=response_body,
+                        request_id=request_id,
+                    )
 
-                return AsyncHTTPResponse(
-                    status_code=status_code,
-                    headers=resp_headers,
-                    body=response_body,
-                    request_id=request_id,
-                )
-
-            except builtins.TimeoutError:
+            except asyncio.TimeoutError as e:
                 last_error = TimeoutError(
-                    f"Request timed out after {timeout}s",
+                    f"Request timed out: {e}",
                     timeout_type="read",
-                    timeout_seconds=timeout,
+                    timeout_seconds=timeout or self._timeout_seconds,
                 )
-                if writer:
-                    writer.close()
-            except OSError as e:
+            except aiohttp.ClientConnectorError as e:
                 last_error = ConnectionError(f"Connection failed: {e}")
-                if writer:
-                    writer.close()
+            except aiohttp.ClientError as e:
+                last_error = ProviderAPIError(f"HTTP error: {e}")
             except Exception as e:
                 last_error = ProviderAPIError(f"Request failed: {e}")
-                if writer:
-                    writer.close()
-
-            # Exponential backoff with jitter
-            if attempt < self._max_retries - 1:
-                delay = self._retry_delay * (2**attempt) + random.uniform(0, 0.5)
-                await asyncio.sleep(delay)
 
         raise last_error or ConnectionError("Request failed after retries")
 
-    async def _stream_response_async(
+    async def _stream_request(
         self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-        headers: dict[str, str],
+        session: aiohttp.ClientSession,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None,
+        body: bytes | None,
+        timeout: aiohttp.ClientTimeout,
     ) -> AsyncIterator[bytes]:
-        """Stream response body as async iterator."""
-        try:
-            transfer_encoding = headers.get("transfer-encoding", "").lower()
-            is_chunked = "chunked" in transfer_encoding
-            content_encoding = headers.get("content-encoding", "").lower()
-
-            # Setup decompressor if needed
-            decompressor = None
-            if content_encoding == "gzip":
-                decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-            elif content_encoding == "deflate":
-                decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
-
-            if is_chunked:
-                async for chunk in self._stream_chunked(reader):
-                    if decompressor:
-                        chunk = decompressor.decompress(chunk)
-                    yield chunk
-                if decompressor:
-                    remaining = decompressor.flush()
-                    if remaining:
-                        yield remaining
-            else:
-                while True:
-                    chunk = await reader.read(8192)
-                    if not chunk:
-                        break
-                    if decompressor:
-                        chunk = decompressor.decompress(chunk)
-                    yield chunk
-                if decompressor:
-                    remaining = decompressor.flush()
-                    if remaining:
-                        yield remaining
-        finally:
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
-
-    async def _stream_chunked(self, reader: asyncio.StreamReader) -> AsyncIterator[bytes]:
-        """Stream chunked transfer encoding."""
-        while True:
-            size_line = await reader.readline()
-            size_str = size_line.decode("utf-8").strip()
-            if not size_str:
-                continue
-            if ";" in size_str:
-                size_str = size_str.split(";")[0]
-            chunk_size = int(size_str, 16)
-
-            if chunk_size == 0:
-                await reader.readline()
-                break
-
-            chunk = await reader.readexactly(chunk_size)
-            yield chunk
-            await reader.readline()
+        """Stream response body."""
+        async with session.request(
+            method,
+            url,
+            headers=headers,
+            data=body,
+            timeout=timeout,
+            proxy=self._proxy,
+        ) as response:
+            async for chunk in response.content.iter_any():
+                yield chunk
 
     async def post(
         self,
@@ -397,7 +291,7 @@ class AsyncHTTPClient:
 
         body = None
         if json_data is not None:
-            body = json.dumps(json_data, ensure_ascii=False).encode("utf-8")
+            body = orjson.dumps(json_data)
 
         return await self.request(
             "POST",
@@ -416,13 +310,18 @@ class AsyncHTTPClient:
         timeout: float | None = None,
     ) -> AsyncHTTPResponse:
         """Make an async GET request."""
-        result = await self.request("GET", url, headers=headers, timeout=timeout, stream=False)
+        result = await self.request(
+            "GET", url, headers=headers, timeout=timeout, stream=False
+        )
         assert isinstance(result, AsyncHTTPResponse)
         return result
 
     async def close(self) -> None:
-        """Close the client (no-op for now, connections close after use)."""
-        pass
+        """Close the client and all connections."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+        if self._connector is not None and not self._connector.closed:
+            await self._connector.close()
 
     async def __aenter__(self) -> AsyncHTTPClient:
         return self
