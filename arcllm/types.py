@@ -24,8 +24,8 @@ class _DictLike:
     Litellm's response classes inherit from a Pydantic base that
     transparently supports both attribute and item access — call sites
     routinely do ``response["data"]`` *and* ``response.data``
-    interchangeably, often inside test fixtures that set fields after
-    construction. This mixin gives arcllm's strongly-typed
+    interchangeably, plus ``dict(usage)`` to coerce a Usage record into
+    a plain dict. This mixin gives arcllm's strongly-typed
     ``msgspec.Struct`` types the same surface so a litellm-trained
     caller can keep working unchanged.
 
@@ -33,12 +33,18 @@ class _DictLike:
     msgspec's type validation still applies to the canonical attribute
     path. ``__setitem__`` calls ``setattr`` directly, which lets
     fixtures populate fields with whatever shape the test wants
-    (mirrors litellm's loose typing).
+    (mirrors litellm's loose typing). ``keys() + __getitem__`` form
+    the mapping protocol so ``dict(obj)`` and ``**obj`` unpacking work.
     """
 
     __slots__ = ()
 
     def __getitem__(self, key: str) -> Any:
+        if not isinstance(key, str):
+            # ``dict()`` falls back to integer indexing when the mapping
+            # protocol isn't recognised; reject those cleanly so the
+            # caller's error message points at the actual problem.
+            raise KeyError(key)
         try:
             return getattr(self, key)
         except AttributeError as exc:
@@ -52,6 +58,24 @@ class _DictLike:
 
     def __contains__(self, key: str) -> bool:
         return hasattr(self, key) and getattr(self, key) is not None
+
+    def __iter__(self) -> Any:
+        """Yield field names — matches ``dict.__iter__`` semantics so
+        ``for k in obj`` and ``**obj`` work like a mapping."""
+        return iter(type(self).__struct_fields__)  # type: ignore[attr-defined]
+
+    def __len__(self) -> int:
+        return len(type(self).__struct_fields__)  # type: ignore[attr-defined]
+
+    def keys(self) -> Any:
+        """Return the Struct's declared field names. Required by ``dict()``."""
+        return type(self).__struct_fields__  # type: ignore[attr-defined]
+
+    def values(self) -> Any:
+        return [getattr(self, k) for k in self.keys()]
+
+    def items(self) -> Any:
+        return [(k, getattr(self, k)) for k in self.keys()]
 
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)

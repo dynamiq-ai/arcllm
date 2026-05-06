@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arcllm-sdk"
-version = "0.4.3"
+version = "0.4.4"
 description = "The arc connecting you to every LLM. Minimal dependencies, maximum performance."
 readme = "README.md"
 license = "Apache-2.0"
