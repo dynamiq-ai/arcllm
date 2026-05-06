@@ -37,16 +37,16 @@ class ArcLLMError(Exception):
     def __init__(
         self,
         message: str,
-        *,
         provider: str | None = None,
-        # Litellm-compat alias: callers migrating from litellm pass
-        # ``llm_provider`` (its kwarg name). If both are given, ``provider``
-        # wins so explicit arcllm code keeps its semantics.
-        llm_provider: str | None = None,
         model: str | None = None,
         status_code: int | None = None,
         request_id: str | None = None,
         raw_response: Any | None = None,
+        *,
+        # Litellm-compat alias: callers migrating from litellm pass
+        # ``llm_provider`` (its kwarg name). If both are given, ``provider``
+        # wins so explicit arcllm code keeps its semantics.
+        llm_provider: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -103,11 +103,17 @@ class RateLimitError(ArcLLMError):
     def __init__(
         self,
         message: str,
-        *,
+        provider: str | None = None,
+        model: str | None = None,
+        *args: Any,
         retry_after: float | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, **kwargs)
+        if provider is not None:
+            kwargs.setdefault("provider", provider)
+        if model is not None:
+            kwargs.setdefault("model", model)
+        super().__init__(message, *args, **kwargs)
         self.retry_after = retry_after
 
 
@@ -151,17 +157,31 @@ class ProviderAPIError(ArcLLMError):
 
     This is used for provider-specific errors that don't map to
     other more specific exception types.
+
+    Litellm-compat: callers may construct this as
+    ``ProviderAPIError(status_code, message, provider, model)`` (litellm's
+    ``APIError`` signature). Detection is by type — if the first arg is an
+    ``int``, it's the status code and the remaining positionals shift.
     """
 
     def __init__(
         self,
-        message: str,
-        *,
+        *args: Any,
         error_type: str | None = None,
         error_code: str | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, **kwargs)
+        # Litellm `APIError(status_code, message, llm_provider, model)`
+        # vs arcllm `ProviderAPIError(message, provider, model, status_code)`.
+        if args and isinstance(args[0], int):
+            status_code = args[0]
+            message = args[1] if len(args) > 1 else ""
+            provider = args[2] if len(args) > 2 else None
+            model = args[3] if len(args) > 3 else None
+            kwargs.setdefault("status_code", status_code)
+            super().__init__(message, provider, model, **kwargs)
+        else:
+            super().__init__(*args, **kwargs)
         self.error_type = error_type
         self.error_code = error_code
 
@@ -239,7 +259,7 @@ class ContentFilterError(ArcLLMError):
         self.filter_reason = filter_reason
 
 
-class InvalidRequestError(ArcLLMError):
+class BadRequestError(ArcLLMError):
     """
     Raised when the request is malformed or invalid.
 
@@ -247,16 +267,41 @@ class InvalidRequestError(ArcLLMError):
     - Missing required parameters
     - Invalid parameter values
     - Malformed message format
+
+    Litellm-compat: callers may construct this as
+    ``BadRequestError(message, model, llm_provider)`` (litellm signature
+    has ``model`` second). The base ``ArcLLMError`` has ``provider`` second.
+    We accept both shapes — if the second positional looks like a provider
+    name (registered in our provider list), treat it as ``provider``;
+    otherwise treat it as ``model``.
     """
 
     def __init__(
         self,
         message: str,
-        *,
+        arg2: str | None = None,
+        arg3: str | None = None,
+        *args: Any,
         param: str | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, **kwargs)
+        # Disambiguate (provider, model) vs litellm's (model, llm_provider).
+        # Heuristic: if arg2 is a known provider name and arg3 isn't, use
+        # arcllm's order. If arg3 is a known provider and arg2 isn't, use
+        # litellm's (model, llm_provider) order. Falls back to arcllm's order.
+        if arg2 is not None and arg3 is not None:
+            from arcllm.providers.base import SUPPORTED_PROVIDERS
+
+            if arg2 not in SUPPORTED_PROVIDERS and arg3 in SUPPORTED_PROVIDERS:
+                # Litellm shape: (message, model, llm_provider)
+                kwargs.setdefault("provider", arg3)
+                kwargs.setdefault("model", arg2)
+            else:
+                kwargs.setdefault("provider", arg2)
+                kwargs.setdefault("model", arg3)
+        elif arg2 is not None:
+            kwargs.setdefault("provider", arg2)
+        super().__init__(message, *args, **kwargs)
         self.param = param
 
 
@@ -325,7 +370,7 @@ def map_status_code_to_exception(
     if status_code == 404:
         return UnsupportedModelError(message, status_code=status_code, **kwargs)
     if status_code == 400:
-        return InvalidRequestError(message, status_code=status_code, **kwargs)
+        return BadRequestError(message, status_code=status_code, **kwargs)
     if status_code == 408:
         return TimeoutError(message, status_code=status_code, **kwargs)
     if status_code == 503:
@@ -345,4 +390,4 @@ APIConnectionError = ConnectionError
 # ``ProviderAPIError`` (the broader provider-error base) and
 # ``InvalidRequestError`` (400-class semantics) respectively.
 APIError = ProviderAPIError
-BadRequestError = InvalidRequestError
+InvalidRequestError = BadRequestError

@@ -274,12 +274,22 @@ class Usage(_DictLike, msgspec.Struct):
 
 
 class Choice(_DictLike, msgspec.Struct):
-    """A single choice in a completion response."""
+    """A single choice in a completion response.
+
+    Litellm uses one class (``Choices``) for both non-streaming and
+    streaming responses — same object exposes ``.message`` for chat
+    completions and ``.delta`` for stream chunks. arcllm normally
+    separates these into :class:`Choice` (chat) and :class:`ChunkChoice`
+    (stream), but ``delta`` is exposed here too so litellm-style code
+    that uses ``ModelResponse`` for both modes keeps working.
+    """
 
     index: int = 0
     message: Message = msgspec.field(default_factory=Message)
     finish_reason: str | None = None
     logprobs: dict[str, Any] | None = None
+    # Litellm-compat: streaming code paths set ``.delta`` on a Choice.
+    delta: ChunkDelta | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Return dict representation for serialization."""
@@ -291,6 +301,8 @@ class Choice(_DictLike, msgspec.Struct):
             result["finish_reason"] = self.finish_reason
         if self.logprobs is not None:
             result["logprobs"] = self.logprobs
+        if self.delta is not None:
+            result["delta"] = self.delta.model_dump()
         return result
 
 
@@ -320,6 +332,11 @@ class ModelResponse(_DictLike, msgspec.Struct):
     choices: list[Choice] = msgspec.field(default_factory=lambda: [Choice()])
     usage: Usage | None = None
     system_fingerprint: str | None = None
+    # Litellm-compat marker: callers construct ``ModelResponse(stream=True)``
+    # to indicate the response represents a stream chunk. arcllm normally
+    # uses :class:`StreamChunk` for that, but accepting the kwarg keeps
+    # litellm fixtures working unchanged.
+    stream: bool = False
     # Extra fields for debugging/compatibility
     model_extra: dict[str, Any] = {}
 
