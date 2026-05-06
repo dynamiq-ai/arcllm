@@ -60,6 +60,21 @@ CHAT_TARGETS: list[tuple[str, str, str, dict[str, Any]]] = [
     ("openrouter", "OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini", {}),
     ("sambanova", "SAMBANOVA_API_KEY", "sambanova/Meta-Llama-3.3-70B-Instruct", {}),
     ("cohere", "COHERE_API_KEY", "cohere/command-r-08-2024", {}),
+    ("cerebras", "CEREBRAS_API_KEY", "cerebras/llama3.1-8b", {}),
+    ("deepinfra", "DEEPINFRA_API_KEY", "deepinfra/meta-llama/Llama-3.3-70B-Instruct", {}),
+    ("deepseek", "DEEPSEEK_API_KEY", "deepseek/deepseek-chat", {}),
+    (
+        "nvidia_nim",
+        "NVIDIA_NIM_API_KEY",
+        "nvidia_nim/meta/llama-3.3-70b-instruct",
+        {},
+    ),
+    (
+        "watsonx",
+        "WATSONX_API_KEY",
+        "watsonx/meta-llama/llama-3-3-70b-instruct",
+        {"max_tokens": 16},
+    ),
     (
         "bedrock",
         "AWS_ACCESS_KEY_ID",
