@@ -25,7 +25,7 @@ def main():
 
     print(f"Model: {response.model}")
     print(f"Number of embeddings: {len(response.data)}")
-    print(f"\nUsage:")
+    print("\nUsage:")
     print(f"  Prompt tokens: {response.usage.prompt_tokens}")
     print(f"  Total tokens: {response.usage.total_tokens}")
 
@@ -53,7 +53,7 @@ def single_embedding():
 
 def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     """Calculate cosine similarity between two vectors."""
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
     magnitude1 = sum(a * a for a in vec1) ** 0.5
     magnitude2 = sum(b * b for b in vec2) ** 0.5
     if magnitude1 == 0 or magnitude2 == 0:

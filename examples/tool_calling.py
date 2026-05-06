@@ -5,8 +5,8 @@ This example demonstrates function/tool calling with the unified API.
 """
 
 import json
-import arcllm
 
+import arcllm
 
 # Define tools
 tools = [
@@ -54,22 +54,24 @@ tools = [
 
 def get_weather(location: str, unit: str = "celsius") -> str:
     """Mock weather function."""
-    return json.dumps({
-        "location": location,
-        "temperature": 22 if unit == "celsius" else 72,
-        "unit": unit,
-        "conditions": "sunny",
-    })
+    return json.dumps(
+        {
+            "location": location,
+            "temperature": 22 if unit == "celsius" else 72,
+            "unit": unit,
+            "conditions": "sunny",
+        }
+    )
 
 
 def search_web(query: str) -> str:
     """Mock search function."""
-    return json.dumps({
-        "query": query,
-        "results": [
-            {"title": "Example result", "snippet": f"Information about {query}"}
-        ],
-    })
+    return json.dumps(
+        {
+            "query": query,
+            "results": [{"title": "Example result", "snippet": f"Information about {query}"}],
+        }
+    )
 
 
 def execute_tool(tool_call: arcllm.ToolCall) -> str:
@@ -79,16 +81,18 @@ def execute_tool(tool_call: arcllm.ToolCall) -> str:
 
     if name == "get_weather":
         return get_weather(**args)
-    elif name == "search_web":
+    if name == "search_web":
         return search_web(**args)
-    else:
-        return json.dumps({"error": f"Unknown function: {name}"})
+    return json.dumps({"error": f"Unknown function: {name}"})
 
 
 def main():
     """Run tool calling example."""
     messages = [
-        {"role": "system", "content": "You are a helpful assistant with access to weather and search tools."},
+        {
+            "role": "system",
+            "content": "You are a helpful assistant with access to weather and search tools.",
+        },
         {"role": "user", "content": "What's the weather like in San Francisco?"},
     ]
 
@@ -110,11 +114,13 @@ def main():
         print(f"\nModel wants to call {len(assistant_message.tool_calls)} tool(s):")
 
         # Add assistant message to conversation
-        messages.append({
-            "role": "assistant",
-            "content": assistant_message.content,
-            "tool_calls": [tc.model_dump() for tc in assistant_message.tool_calls],
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": assistant_message.content,
+                "tool_calls": [tc.model_dump() for tc in assistant_message.tool_calls],
+            }
+        )
 
         # Execute each tool call
         for tool_call in assistant_message.tool_calls:
@@ -126,11 +132,13 @@ def main():
             print(f"  Result: {result}")
 
             # Add tool result to conversation
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": result,
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result,
+                }
+            )
 
         # Second call - model processes tool results
         print("\n--- Getting final response ---\n")

@@ -5,6 +5,7 @@ This example demonstrates JSON mode and JSON schema structured output.
 """
 
 import json
+
 import arcllm
 
 
@@ -77,7 +78,7 @@ def json_schema_example():
 
     # Parse and validate
     data = json.loads(content)
-    print(f"Parsed profile:")
+    print("Parsed profile:")
     print(f"  Name: {data['name']}")
     print(f"  Age: {data['age']}")
     print(f"  Email: {data['email']}")
@@ -143,7 +144,7 @@ def extract_entities_example():
     content = response.choices[0].message.content
     data = json.loads(content)
 
-    print(f"Extracted entities:")
+    print("Extracted entities:")
     print(f"  Person: {data['person']['name']} - {data['person'].get('title', 'N/A')}")
     print(f"  Company: {data['company']['name']}")
     if "skills" in data:

@@ -2,13 +2,14 @@
 Simple completion example for arcllm.
 
 This example demonstrates basic chat completion usage.
+
+Run::
+
+    export OPENAI_API_KEY="sk-..."
+    python examples/simple_completion.py
 """
 
-import os
 import arcllm
-
-# Ensure API key is set
-# export OPENAI_API_KEY="your-key"
 
 
 def main():
@@ -46,31 +47,29 @@ def main():
 
 
 def example_with_different_providers():
-    """Examples with different providers."""
+    """Sketches of model strings for other providers.
+
+    Each block is commented out — uncomment after exporting the matching
+    API key (see README "Authentication" table).
+    """
     # OpenAI
-    # response = arcllm.completion(
-    #     model="openai/gpt-4o-mini",
-    #     messages=[{"role": "user", "content": "Hello!"}]
-    # )
+    # arcllm.completion(model="openai/gpt-4o-mini", messages=msgs)
 
-    # Anthropic (set ANTHROPIC_API_KEY)
-    # response = arcllm.completion(
-    #     model="anthropic/claude-3-5-sonnet-latest",
-    #     messages=[{"role": "user", "content": "Hello!"}]
-    # )
+    # Anthropic — set ANTHROPIC_API_KEY
+    # arcllm.completion(model="anthropic/claude-haiku-4-5", messages=msgs)
 
-    # Gemini (set GEMINI_API_KEY or GOOGLE_API_KEY)
-    # response = arcllm.completion(
-    #     model="gemini/gemini-1.5-flash",
-    #     messages=[{"role": "user", "content": "Hello!"}]
-    # )
+    # Gemini — set GEMINI_API_KEY
+    # arcllm.completion(model="gemini/gemini-2.5-flash-lite", messages=msgs)
 
-    # Groq (set GROQ_API_KEY)
-    # response = arcllm.completion(
-    #     model="groq/llama-3.1-70b-versatile",
-    #     messages=[{"role": "user", "content": "Hello!"}]
-    # )
-    pass
+    # Groq — set GROQ_API_KEY
+    # arcllm.completion(model="groq/llama-3.3-70b-versatile", messages=msgs)
+
+    # xAI — set XAI_API_KEY
+    # arcllm.completion(model="xai/grok-3-mini", messages=msgs)
+
+    # Cohere — set COHERE_API_KEY
+    # arcllm.completion(model="cohere/command-r-08-2024", messages=msgs)
+    return
 
 
 if __name__ == "__main__":

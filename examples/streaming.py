@@ -38,7 +38,7 @@ def main():
 
         # Print usage if present (final chunk with include_usage=True)
         if chunk.usage:
-            print(f"\nUsage:")
+            print("\nUsage:")
             print(f"  Prompt tokens: {chunk.usage.prompt_tokens}")
             print(f"  Completion tokens: {chunk.usage.completion_tokens}")
             print(f"  Total tokens: {chunk.usage.total_tokens}")
@@ -71,6 +71,7 @@ async def async_streaming():
 if __name__ == "__main__":
     main()
 
-    # To run async example:
-    # import asyncio
-    # asyncio.run(async_streaming())
+    print("\n\n=== Async streaming ===\n")
+    import asyncio
+
+    asyncio.run(async_streaming())
