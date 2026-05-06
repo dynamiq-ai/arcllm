@@ -560,12 +560,14 @@ class CohereAdapter(BaseAdapter):
             ) from e
 
         raw_embeddings = resp.get("embeddings")
+        vectors: list[list[float]]
         if isinstance(raw_embeddings, dict):
             # v2 shape: {"float": [[...], ...], "int8": [[...], ...], ...}
-            vectors: list[list[float]] = raw_embeddings.get("float") or []
+            v2_dict = cast("dict[str, list[list[float]]]", raw_embeddings)
+            vectors = v2_dict.get("float") or []
         elif isinstance(raw_embeddings, list):
             # v1 shape: list of vectors directly
-            vectors = raw_embeddings
+            vectors = cast("list[list[float]]", raw_embeddings)
         else:
             vectors = []
 
@@ -634,7 +636,8 @@ class CohereAdapter(BaseAdapter):
             ) from exc
 
         results: list[RerankResult] = []
-        for raw_item in resp.get("results") or []:
+        raw_results = cast("list[Any]", resp.get("results") or [])
+        for raw_item in raw_results:
             if not isinstance(raw_item, dict):
                 continue
             item = cast("dict[str, Any]", raw_item)
