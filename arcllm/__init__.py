@@ -69,10 +69,13 @@ See README.md for complete documentation.
 
 from __future__ import annotations
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __all__ = [
+    "APIConnectionError",
+    "APIError",
     "ArcLLMError",
     "AuthenticationError",
+    "BadRequestError",
     "BudgetExceededError",
     "Choice",
     "ChunkChoice",
@@ -99,6 +102,7 @@ __all__ = [
     "ServiceUnavailableError",
     "StreamChunk",
     "StreamingResponse",
+    "Timeout",
     "TimeoutError",
     "ToolCall",
     "UnsupportedModelError",
@@ -157,8 +161,11 @@ from arcllm.core import (
 
 # Exceptions
 from arcllm.exceptions import (
+    APIConnectionError,
+    APIError,
     ArcLLMError,
     AuthenticationError,
+    BadRequestError,
     BudgetExceededError,
     ConnectionError,
     ContentFilterError,
@@ -168,6 +175,7 @@ from arcllm.exceptions import (
     RateLimitError,
     ResponseParseError,
     ServiceUnavailableError,
+    Timeout,
     TimeoutError,
     UnsupportedModelError,
     UnsupportedParameterError,

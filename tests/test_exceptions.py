@@ -256,3 +256,44 @@ class TestNewExceptionClasses:
         err = InternalServerError("oops", provider="anthropic", status_code=500)
         assert err.provider == "anthropic"
         assert isinstance(err, ProviderAPIError)
+
+
+class TestLitellmCompatAliases:
+    """Litellm-compat aliases let downstream callers (notably dynamiq) import
+    the legacy litellm.exceptions names without code changes. The aliases must
+    be the *same class object* as their arcllm-canonical counterparts so that
+    issubclass/isinstance checks across the boundary keep working.
+    """
+
+    def test_timeout_alias(self):
+        from arcllm.exceptions import Timeout
+        from arcllm.exceptions import TimeoutError as ArcLLMTimeoutError
+
+        assert Timeout is ArcLLMTimeoutError
+
+    def test_api_connection_error_alias(self):
+        from arcllm.exceptions import APIConnectionError
+        from arcllm.exceptions import ConnectionError as ArcLLMConnectionError
+
+        assert APIConnectionError is ArcLLMConnectionError
+
+    def test_api_error_alias(self):
+        from arcllm.exceptions import APIError, ProviderAPIError
+
+        assert APIError is ProviderAPIError
+
+    def test_bad_request_error_alias(self):
+        from arcllm.exceptions import BadRequestError, InvalidRequestError
+
+        assert BadRequestError is InvalidRequestError
+
+    def test_aliases_are_top_level_arcllm_exports(self):
+        """dynamiq imports e.g. ``from arcllm import APIError`` — these must
+        be reachable from the top-level arcllm namespace too, not just
+        ``arcllm.exceptions``."""
+        import arcllm
+
+        assert arcllm.APIError is arcllm.exceptions.ProviderAPIError
+        assert arcllm.BadRequestError is arcllm.exceptions.InvalidRequestError
+        assert arcllm.Timeout is arcllm.exceptions.TimeoutError
+        assert arcllm.APIConnectionError is arcllm.exceptions.ConnectionError
