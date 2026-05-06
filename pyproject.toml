@@ -9,7 +9,7 @@ description = "The arc connecting you to every LLM. Minimal dependencies, maximu
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 authors = [
     { name = "Dynamiq AI" }
 ]
@@ -20,6 +20,8 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -70,7 +72,7 @@ Issues = "https://github.com/dynamiq-ai/arcllm/issues"
 packages = ["arcllm"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
@@ -103,6 +105,7 @@ ignore = [
     "ANN401",  # dynamically typed expressions (Any) - needed for LLM APIs
     "ARG001",  # unused function argument - kept for API compatibility
     "ARG002",  # unused method argument - required for interface compatibility
+    "PERF203", # try/except in loop — only matters on 3.10 and our retry loops are unhappy-path
     "PERF401", # use list comprehension - explicit loops can be clearer
     "PLR0911", # too many returns - error mapping has many cases
     "PLR0912", # too many branches - complex parsing logic is OK
@@ -136,12 +139,20 @@ ignore = [
     "PLR",     # Complexity OK in code-gen scripts
     "SIM108",  # Ternary not always clearer in generators
 ]
+"examples/*" = [
+    "ANN",     # Examples don't need full type annotations
+    "T20",     # Print OK in examples — they exist to be run interactively
+    "PLR",     # Don't enforce complexity caps on examples
+    "SIM108",  # Ternary readability is reader-dependent
+    "S101",    # Bare assert OK
+    "INP001",  # Implicit namespace package OK
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["arcllm"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
@@ -212,7 +223,7 @@ omit = [
 ]
 
 [tool.pyright]
-pythonVersion = "3.12"
+pythonVersion = "3.10"
 typeCheckingMode = "strict"
 reportMissingImports = true
 reportMissingTypeStubs = false

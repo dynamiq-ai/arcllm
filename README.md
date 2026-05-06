@@ -15,7 +15,7 @@
   <a href="https://pypi.org/project/arcllm-sdk/"><img src="https://img.shields.io/pypi/v/arcllm-sdk?color=blue&label=PyPI" alt="PyPI"></a>
   <a href="https://pypi.org/project/arcllm-sdk/"><img src="https://img.shields.io/pypi/pyversions/arcllm-sdk" alt="Python"></a>
   <a href="https://github.com/dynamiq-ai/arcllm/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
-  <a href="https://github.com/dynamiq-ai/arcllm/actions"><img src="https://img.shields.io/github/actions/workflow/status/dynamiq-ai/arcllm/ci.yml?branch=main" alt="CI"></a>
+  <a href="https://github.com/dynamiq-ai/arcllm/actions/workflows/ci.yml"><img src="https://github.com/dynamiq-ai/arcllm/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 <p align="center">
@@ -52,7 +52,7 @@ import arcllm
 
 # Simple completion
 response = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
@@ -62,7 +62,7 @@ print(response.choices[0].message.content)
 
 ```python
 stream = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "Write a haiku about coding"}],
     stream=True
 )
@@ -105,23 +105,87 @@ arcllm.completion(model="ollama/llama3.3", messages=messages)
 
 ## Supported providers
 
-| Provider | Prefix | Models | Auth |
-|----------|--------|--------|------|
-| **OpenAI** | `openai/` | GPT-5, GPT-4o, o-series reasoning | `OPENAI_API_KEY` |
-| **Anthropic** | `anthropic/` | Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 (incl. extended thinking) | `ANTHROPIC_API_KEY` |
-| **Google Gemini** | `gemini/` | Gemini 2.5 / 3.x (with thinking config) | `GEMINI_API_KEY` |
-| **Mistral** | `mistral/` | Mistral Large, Medium, Small, Codestral, Pixtral | `MISTRAL_API_KEY` |
-| **Cohere** | `cohere/` | Command A, Command R+, Aya Vision, Embed v4 | `COHERE_API_KEY` |
-| **Groq** | `groq/` | Llama 3.x / 4.x, GPT-OSS, Qwen 3 | `GROQ_API_KEY` |
-| **Together AI** | `together_ai/` | Llama 4, Qwen 3, DeepSeek V4, Kimi, GLM, MiniMax | `TOGETHER_API_KEY` |
-| **Fireworks AI** | `fireworks_ai/` | DeepSeek V4 Pro, Kimi K2.6, GLM 5.1, Llama, Qwen | `FIREWORKS_API_KEY` |
-| **DeepSeek** | `deepseek/` | DeepSeek V4 Flash + Pro (reasoning + chat) | `DEEPSEEK_API_KEY` |
-| **Perplexity** | `perplexity/` | Sonar, Sonar Pro, Sonar Reasoning, Deep Research | `PERPLEXITY_API_KEY` |
-| **Ollama** | `ollama/` | Local: Llama, Qwen, Gemma, DeepSeek-R1, Phi | (local server) |
-| **Azure** | `azure/` | OpenAI Service + AI Foundry serverless (Phi, Llama, Cohere, Mistral) | `AZURE_OPENAI_API_KEY` |
-| **AWS Bedrock** | `bedrock/` | Anthropic, OpenAI GPT-OSS, Llama, Mistral, Cohere, Nova, Titan, AI21 | AWS SigV4 |
-| **Google Vertex** | `vertex_ai/` | Gemini + Anthropic Claude + Mistral + Llama on Vertex | OAuth (gcloud / ADC) |
-| **Databricks** | `databricks/` | Llama, Claude, Gemini, GPT-5 on Foundation Model APIs | `DATABRICKS_TOKEN` |
+28 providers, grouped by surface. The model prefix you pass to `arcllm.completion(model=...)` is shown in the **Prefix** column.
+
+### First-party APIs
+
+| Provider | Prefix | Highlights |
+|---|---|---|
+| **OpenAI** | `openai/` | GPT-5 family, GPT-4.1, GPT-4o, o-series reasoning, embeddings |
+| **Anthropic** | `anthropic/` | Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 (extended thinking) |
+| **Google Gemini** | `gemini/` | Gemini 2.5 / 3.x with thinking config |
+| **Mistral** | `mistral/` | Mistral Large/Medium/Small, Codestral, Pixtral, embeddings |
+| **Cohere** | `cohere/` | Command A/R+/R, Aya Vision, Embed v4, Rerank v3.5 |
+| **DeepSeek** | `deepseek/` | DeepSeek V4 Flash + Pro (chat + reasoner) |
+| **xAI** | `xai/` | Grok-4 / 4.1 / 4.20 / 4.3 family + Grok-3 (legacy) |
+| **Perplexity** | `perplexity/` | Sonar, Sonar Pro, Sonar Reasoning, Deep Research |
+| **Groq** | `groq/` | Llama 3/4, GPT-OSS, Qwen 3 (LPU low-latency) |
+| **Together AI** | `together_ai/` | Llama 4, Qwen 3, DeepSeek V4, Kimi, GLM, MiniMax |
+| **Fireworks AI** | `fireworks_ai/` | DeepSeek V4 Pro, Kimi K2, GLM 5.1, Llama, Qwen |
+| **Cerebras** | `cerebras/` | Llama 3.x, Qwen 3, GPT-OSS on CS-3 wafer-scale |
+| **SambaNova** | `sambanova/` | Llama 3.x / Llama 4, DeepSeek, MiniMax on RDU |
+| **DeepInfra** | `deepinfra/` | Full open-weights catalog: Llama, Qwen, DeepSeek, Phi, Gemma, Kimi |
+| **AI21** | `ai21/` | Jamba 1.5 Large + Mini |
+| **Nebius AI** | `nebius/` | Llama 3.x, Qwen 2.5/3, DeepSeek R1/V3, Mistral, Nemotron |
+| **OVHcloud** | `ovhcloud/` | Llama 3.x, DeepSeek R1, Mistral, Qwen 3 — European GPU cloud |
+| **Z.AI (GLM)** | `zai/` | GLM-4.5 / 4.6 / 5 family by Zhipu AI (incl. vision + reasoning) |
+| **Moonshot AI** | `moonshot/` | Kimi K2.5 / K2.6 / K2-thinking (long-context, multimodal) |
+
+### Cloud platforms
+
+| Provider | Prefix | Highlights |
+|---|---|---|
+| **Azure** | `azure/` | OpenAI Service deployments + AI Foundry (Phi, Llama, Cohere, Mistral) |
+| **AWS Bedrock** | `bedrock/` | Anthropic, OpenAI GPT-OSS, Llama, Mistral, Cohere, Nova, Titan, AI21 |
+| **Google Vertex** | `vertex_ai/` | Gemini + Anthropic Claude + Mistral + Llama on Vertex |
+| **Databricks** | `databricks/` | Llama, Claude, Gemini, GPT-5 on Foundation Model APIs |
+| **IBM watsonx** | `watsonx/` | Granite, Llama, Mistral on IBM Cloud (auto IAM-token exchange) |
+| **NVIDIA NIM** | `nvidia_nim/` | Llama, Nemotron, Mixtral, Phi on `build.nvidia.com` |
+
+### Gateways, local & custom
+
+| Provider | Prefix | Highlights |
+|---|---|---|
+| **OpenRouter** | `openrouter/` | Unified gateway over 300+ upstream models |
+| **HuggingFace** | `huggingface/` | Hub Inference + Inference Endpoints (chat-completions API) |
+| **Ollama** | `ollama/` | Local: Llama, Qwen, Gemma, DeepSeek-R1, Phi (no API key) |
+| **Custom** | `custom/` | Any user-supplied OpenAI-compatible HTTP endpoint |
+
+## Authentication
+
+Every provider reads its key from a documented env var. You can also pass `api_key=` per-call to override.
+
+| Provider | Env var(s) | Notes |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | |
+| Anthropic | `ANTHROPIC_API_KEY` | |
+| Gemini | `GEMINI_API_KEY` | AI Studio key |
+| Mistral | `MISTRAL_API_KEY` | |
+| Cohere | `COHERE_API_KEY` | v2 endpoints |
+| DeepSeek | `DEEPSEEK_API_KEY` | direct API (`api.deepseek.com`) |
+| xAI | `XAI_API_KEY` | |
+| Perplexity | `PERPLEXITY_API_KEY` | |
+| Groq | `GROQ_API_KEY` | |
+| Together AI | `TOGETHER_API_KEY` | |
+| Fireworks AI | `FIREWORKS_API_KEY` | |
+| Cerebras | `CEREBRAS_API_KEY` | |
+| SambaNova | `SAMBANOVA_API_KEY` | |
+| DeepInfra | `DEEPINFRA_API_KEY` | |
+| AI21 | `AI21_API_KEY` | Jamba family |
+| Nebius AI | `NEBIUS_API_KEY` | |
+| OVHcloud | `OVHCLOUD_API_KEY` | European AI Endpoints |
+| Z.AI (GLM) | `ZAI_API_KEY` | |
+| Moonshot AI | `MOONSHOT_API_KEY` | clamp `temperature` to [0, 1]; multimodal arrays only on Kimi vision/video models |
+| Azure | `AZURE_OPENAI_API_KEY` | + `api_base` + `api_version` per call |
+| AWS Bedrock | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | SigV4-signed; honors `AWS_REGION_NAME` / `AWS_SESSION_TOKEN` |
+| Vertex AI | OAuth (gcloud ADC) | falls back to `GOOGLE_APPLICATION_CREDENTIALS` |
+| Databricks | `DATABRICKS_TOKEN` | + `DATABRICKS_HOST` |
+| IBM watsonx | `WATSONX_API_KEY` | raw IBM Cloud key (auto-exchanged for IAM JWT) **or** pre-exchanged JWT. Plus `WATSONX_URL` + `WATSONX_PROJECT_ID` |
+| NVIDIA NIM | `NVIDIA_NIM_API_KEY` | |
+| OpenRouter | `OPENROUTER_API_KEY` | optional `OPENROUTER_REFERER` + `OPENROUTER_APP_NAME` for app attribution |
+| HuggingFace | `HUGGINGFACE_API_KEY` | works against router or custom Inference Endpoint URL |
+| Ollama | none | uses local `OLLAMA_API_BASE` (default `http://localhost:11434`) |
+| Custom | user-supplied | pass `api_base=` plus optional `api_key=` / `extra_headers={...}` |
 
 ## Features
 
@@ -144,7 +208,7 @@ tools = [{
 }]
 
 response = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
     tools=tools
 )
@@ -158,7 +222,7 @@ if response.choices[0].message.tool_calls:
 
 ```python
 response = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "Generate a user profile"}],
     response_format={
         "type": "json_schema",
@@ -288,6 +352,68 @@ response = arcllm.embedding(
 print(f"Dimensions: {len(response.data[0].embedding)}")
 ```
 
+### 🔁 Reranking
+
+```python
+response = arcllm.rerank(
+    model="cohere/rerank-v3.5",
+    query="Who created the Python programming language?",
+    documents=[
+        "Linus Torvalds created the Linux kernel in 1991.",
+        "Guido van Rossum created the Python programming language in 1991.",
+        "Dennis Ritchie designed the C programming language at Bell Labs.",
+    ],
+    top_n=2,
+)
+for r in response.results:
+    print(f"#{r.index}  score={r.relevance_score:.3f}  {r.document}")
+```
+
+`arcllm.arerank(...)` is the async equivalent. Cohere is the supported
+rerank provider; other adapters raise `UnsupportedModelError` when
+called through this surface.
+
+### 🖼️ Image generation
+
+```python
+# DALL-E 3 / gpt-image-1
+img = arcllm.image_generation(
+    model="openai/dall-e-3",
+    prompt="a teal arc connecting two glowing endpoints, vector art",
+    size="1024x1024",
+    quality="standard",
+)
+print(img.data[0].url)
+
+# Variation + edit (multipart) follow the same OpenAI shape
+arcllm.image_variation(model="openai/dall-e-2", image=open("orig.png", "rb").read())
+arcllm.image_edit(
+    model="openai/gpt-image-1",
+    image=open("orig.png", "rb").read(),
+    mask=open("mask.png", "rb").read(),
+    prompt="replace the sky with a starfield",
+)
+```
+
+`aimage_generation`, `aimage_variation`, `aimage_edit` are async equivalents.
+
+### 🔢 Token counting
+
+```python
+n = arcllm.token_counter(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "How many tokens?"}],
+)
+```
+
+Without extras it falls back to a `chars / 4` heuristic and warns once.
+For exact counts on OpenAI-family models install with the `tokenize`
+extra:
+
+```bash
+pip install "arcllm-sdk[tokenize]"   # pulls in tiktoken
+```
+
 ### 💰 Cost Tracking
 
 ```python
@@ -307,13 +433,26 @@ input_cost, output_cost = arcllm.cost_per_token(
 
 ### 🔍 Model capabilities
 
-```python
-arcllm.supports_vision("gpt-4o")                       # True
-arcllm.supports_pdf_input("claude-sonnet-4-5-20250929") # True
-arcllm.supports_tools("gemini-2.5-pro")                # True
-arcllm.supports_structured_output("gpt-4o")            # True
+Pure-Python lookups against the bundled capability + pricing tables.
+No network calls.
 
-arcllm.get_max_tokens("gpt-4o")  # 16384
+```python
+# Boolean predicates
+arcllm.supports_vision("gpt-4o")                          # True
+arcllm.supports_pdf_input("claude-sonnet-4-5-20250929")   # True
+arcllm.supports_tools("gemini-2.5-pro")                   # True
+arcllm.supports_structured_output("gpt-4o")               # True
+arcllm.supports_function_calling("openai/o4-mini")        # True (alias of supports_tools)
+
+# Numbers + records
+arcllm.get_max_tokens("gpt-4o")           # 16384
+arcllm.get_model_pricing("gpt-4o")        # ModelPricing(input_cost_per_million=2.5, ...)
+arcllm.get_model_info("gpt-4o")           # full dict (capabilities + pricing)
+
+# Which OpenAI request params does this model accept?
+arcllm.get_supported_openai_params("openai/o4-mini")
+# -> ['messages', 'max_completion_tokens', 'reasoning_effort', 'tools', ...]
+# (drops 'temperature' / 'top_p' / 'stop' for reasoning models that reject them)
 ```
 
 ## Error Handling
@@ -358,24 +497,6 @@ response = arcllm.completion(
     api_base="https://myresource.openai.azure.com",
     api_version="2024-10-21",
 )
-```
-
-## Migration from LiteLLM
-
-ArcLLM is designed as a drop-in replacement:
-
-```python
-# Before
-import litellm
-response = litellm.completion(model="gpt-4o", messages=messages)
-
-# After
-import arcllm
-response = arcllm.completion(model="gpt-4o", messages=messages)
-
-# Or alias it
-import arcllm as litellm
-response = litellm.completion(model="gpt-4o", messages=messages)
 ```
 
 ## Documentation

@@ -1,14 +1,13 @@
 # OpenAI Provider Documentation
 
-This document provides comprehensive information about the OpenAI provider integration in arcllm, including API references, model information, and implementation details.
+This document covers the OpenAI provider integration in arcllm — API
+references, supported model families, and implementation details.
 
-> **Last Updated:** 2026-01-08
-
-## ⚠️ Important Model Updates (January 2026)
-
-- **GPT-5.2** is the latest flagship model (released December 11, 2025)
-- **GPT-4o is retiring on February 16, 2026** - Migrate to GPT-5 series
-- **GPT-3.5-turbo is deprecated** - Do not use for new development
+For the canonical list of available models and current pricing, consult
+[OpenAI's models page](https://platform.openai.com/docs/models). Model
+metadata that arcllm uses for capability checks and cost calculation
+lives in `tmp/model_manifests/openai.json` and is refreshed monthly via
+the `model-drift.yml` workflow.
 
 ## Quick Links to Official OpenAI Documentation
 

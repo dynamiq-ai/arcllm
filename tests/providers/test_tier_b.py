@@ -88,7 +88,9 @@ def test_watsonx_chat_request_renames_model_to_model_id(
         max_tokens=128,
     )
     assert "us-south.ml.cloud.ibm.com" in req.url
-    assert "/ml/v1/text/chat" in req.url
+    # Non-streaming request hits /chat (not /chat_stream)
+    assert "/ml/v1/text/chat?" in req.url
+    assert "/chat_stream" not in req.url
     assert "version=2024-08-01" in req.url
     body = orjson.loads(req.body or b"")
     assert "model" not in body
@@ -96,6 +98,30 @@ def test_watsonx_chat_request_renames_model_to_model_id(
     assert body["project_id"] == "test-project"
     assert body["temperature"] == 0.7
     assert body["max_tokens"] == 128
+
+
+def test_watsonx_streaming_routes_to_chat_stream_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """watsonx.ai exposes /chat_stream as a separate URL for SSE streaming.
+
+    Sending stream=true to /chat returns a buffered response — the
+    server does *not* honor stream=true on the non-stream path.
+    """
+    monkeypatch.setenv("WATSONX_PROJECT_ID", "test-project")
+    adapter = WatsonXAdapter(
+        ProviderConfig(api_key="eyJ.fake-iam.token", api_base="https://us-south.ml.cloud.ibm.com")
+    )
+    req = adapter.build_request(
+        model="ibm/granite-13b-chat-v2",
+        messages=[{"role": "user", "content": "hi"}],
+        stream=True,
+    )
+    assert "/ml/v1/text/chat_stream?" in req.url
+    # Body still carries stream:true per OpenAI shape — both fields are
+    # required by watsonx.
+    body = orjson.loads(req.body or b"")
+    assert body.get("stream") is True
 
 
 def test_watsonx_explicit_kwarg_project_id_wins(monkeypatch: pytest.MonkeyPatch) -> None:

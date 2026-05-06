@@ -233,7 +233,11 @@ class WatsonXAdapter(OpenAIAdapter):
         if space_id:
             body["space_id"] = space_id
 
-        url = f"{self._api_base.rstrip('/')}/ml/v1/text/chat?version={self._api_version}"
+        # watsonx.ai routes streaming requests to a separate endpoint
+        # — sending stream=true to /chat returns a buffered response, not
+        # SSE chunks. The /chat_stream endpoint accepts the same body.
+        endpoint = "chat_stream" if stream else "chat"
+        url = f"{self._api_base.rstrip('/')}/ml/v1/text/{endpoint}?version={self._api_version}"
         return RequestData(
             method="POST",
             url=url,

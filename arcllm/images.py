@@ -1,21 +1,19 @@
 """
 Image generation / variation / edit public API.
 
-Drop-in for ``litellm.image_generation`` / ``litellm.image_variation`` /
-``litellm.image_edit``. Routes through the same provider registry as
-chat-completion calls; each adapter declares whether it supports images by
-overriding the relevant ``build_image_*_request`` method on
-:class:`arcllm.providers.base.BaseAdapter`.
+Routes through the same provider registry as chat-completion calls.
+Each adapter declares image support by overriding
+``build_image_*_request`` on :class:`arcllm.providers.base.BaseAdapter`.
 
-Provider coverage in 0.4.0:
+Supported providers:
 
-- **OpenAI** (``dall-e-3``, ``dall-e-2``, ``gpt-image-1``) — all three
-  endpoints (generate / variation / edit).
-- **Azure OpenAI** — inherits from OpenAI; works for any deployment that
-  fronts an image-capable model.
+- **OpenAI** (``dall-e-3``, ``dall-e-2``, ``gpt-image-1``) — generate /
+  variation / edit endpoints.
+- **Azure OpenAI** — inherits OpenAI's behaviour for image-capable
+  deployments.
 
-Other providers (Stability, Bedrock Titan Image, Vertex Imagen) raise
-:class:`UnsupportedModelError` until they're plumbed in.
+Other providers raise :class:`UnsupportedModelError` when called via
+this surface.
 """
 
 from __future__ import annotations

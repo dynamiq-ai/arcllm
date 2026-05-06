@@ -1,48 +1,14 @@
 """
 OpenAI adapter for arcllm.
 
-Supports:
-- Chat completions (non-streaming and streaming)
-- Tool/function calling
-- Structured output (JSON mode and JSON schema)
-- Embeddings
-- Vision (image inputs)
-- PDF document input (GPT-5 series)
+Supports chat completions (sync + streaming), tool / function calling,
+JSON-mode and JSON-schema structured output, embeddings, vision inputs,
+PDF inputs, and the o-series reasoning controls.
 
-=============================================================================
-OpenAI API Documentation References (January 2026)
-=============================================================================
-
-IMPORTANT MODEL UPDATES:
-- GPT-5.2 is the current flagship (released December 11, 2025)
-- GPT-4o is retiring on February 16, 2026 - migrate to GPT-5 series
-- GPT-3.5-turbo is deprecated
-
-Core API Endpoints:
-    platform.openai.com/docs/api-reference/chat/create
-    platform.openai.com/docs/api-reference/embeddings/create
-
-Models:
-    platform.openai.com/docs/models (overview)
-    platform.openai.com/docs/models/gpt-5 (current flagship)
-    platform.openai.com/docs/models/o1 (reasoning models)
-    platform.openai.com/docs/models/gpt-4o (deprecated Feb 2026)
-
-Features:
-    platform.openai.com/docs/api-reference/streaming
-    platform.openai.com/docs/guides/function-calling
-    platform.openai.com/docs/guides/structured-outputs
-    platform.openai.com/docs/guides/vision
-
-Pricing:
-    openai.com/pricing
-
-Error Handling:
-    platform.openai.com/docs/guides/error-codes
-
-See docs/providers/openai.md for full documentation
-
-Last Updated: 2026-01-08
+Reference: https://platform.openai.com/docs/api-reference/chat
+Models:    https://platform.openai.com/docs/models
+Pricing:   https://openai.com/pricing
+Errors:    https://platform.openai.com/docs/guides/error-codes
 """
 
 from __future__ import annotations

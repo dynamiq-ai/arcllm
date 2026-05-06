@@ -19,12 +19,16 @@ from arcllm.providers.deepinfra_adapter import DeepInfraAdapter
 from arcllm.providers.deepseek_adapter import DeepSeekAdapter
 from arcllm.providers.fireworks_adapter import FireworksAdapter
 from arcllm.providers.groq_adapter import GroqAdapter
+from arcllm.providers.moonshot_adapter import MoonshotAdapter
+from arcllm.providers.nebius_adapter import NebiusAdapter
 from arcllm.providers.nvidia_nim_adapter import NvidiaNIMAdapter
 from arcllm.providers.openrouter_adapter import OpenRouterAdapter
+from arcllm.providers.ovhcloud_adapter import OVHCloudAdapter
 from arcllm.providers.perplexity_adapter import PerplexityAdapter
 from arcllm.providers.sambanova_adapter import SambaNovaAdapter
 from arcllm.providers.together_adapter import TogetherAdapter
 from arcllm.providers.xai_adapter import XAIAdapter
+from arcllm.providers.zai_adapter import ZAIAdapter
 
 
 @pytest.mark.parametrize(
@@ -46,6 +50,11 @@ from arcllm.providers.xai_adapter import XAIAdapter
         (CerebrasAdapter, "api.cerebras.ai", "llama-3.3-70b"),
         (SambaNovaAdapter, "api.sambanova.ai", "Meta-Llama-3.3-70B-Instruct"),
         (DeepInfraAdapter, "api.deepinfra.com", "meta-llama/Llama-3.3-70B-Instruct"),
+        # Production push (0.4) — 4 more OpenAI-compat providers
+        (NebiusAdapter, "api.studio.nebius.ai", "meta-llama/Llama-3.3-70B-Instruct"),
+        (OVHCloudAdapter, "endpoints.kepler.ai.cloud.ovh.net", "Llama-3.3-70B-Instruct"),
+        (ZAIAdapter, "api.z.ai", "glm-4.6"),
+        (MoonshotAdapter, "api.moonshot.ai", "kimi-k2.6"),
     ],
 )
 def test_chat_request_targets_correct_host(
@@ -216,6 +225,11 @@ def test_extra_headers_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
         (CerebrasAdapter, "CEREBRAS_API_KEY"),
         (SambaNovaAdapter, "SAMBANOVA_API_KEY"),
         (DeepInfraAdapter, "DEEPINFRA_API_KEY"),
+        # Production push
+        (NebiusAdapter, "NEBIUS_API_KEY"),
+        (OVHCloudAdapter, "OVHCLOUD_API_KEY"),
+        (ZAIAdapter, "ZAI_API_KEY"),
+        (MoonshotAdapter, "MOONSHOT_API_KEY"),
     ],
 )
 def test_api_key_resolution_from_env(
