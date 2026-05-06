@@ -368,3 +368,35 @@ class TestDictLikeAccess:
         response = EmbeddingResponse()
         with pytest.raises(KeyError):
             _ = response["does_not_exist"]
+
+    def test_dict_coercion_usage(self):
+        """``dict(usage)`` works because the mixin implements the mapping
+        protocol (keys + __getitem__). Litellm callers rely on this for
+        emitting trace/cost metadata."""
+        from arcllm.types import Usage
+
+        usage = Usage(prompt_tokens=42, completion_tokens=8, total_tokens=50)
+        as_dict = dict(usage)
+        assert as_dict["prompt_tokens"] == 42
+        assert as_dict["completion_tokens"] == 8
+        assert as_dict["total_tokens"] == 50
+
+    def test_iter_yields_field_names(self):
+        from arcllm.types import EmbeddingUsage
+
+        u = EmbeddingUsage(prompt_tokens=3, total_tokens=3)
+        assert list(u) == ["prompt_tokens", "total_tokens"]
+
+    def test_len_matches_struct_fields(self):
+        from arcllm.types import EmbeddingUsage
+
+        assert len(EmbeddingUsage()) == 2
+
+    def test_items_and_values_pair_with_keys(self):
+        from arcllm.types import EmbeddingUsage
+
+        u = EmbeddingUsage(prompt_tokens=1, total_tokens=1)
+        items = list(u.items())
+        values = list(u.values())
+        assert all(isinstance(k, str) for k, _ in items)
+        assert [v for _, v in items] == values
