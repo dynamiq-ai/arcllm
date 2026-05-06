@@ -44,7 +44,13 @@ jobs:
       - name: Verify tag matches pyproject version
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
-          pkg_version=$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          # Scrape the version line directly so we don't depend on
+          # ``tomllib`` (3.11+) or pull in ``tomli`` just for one line.
+          pkg_version=$(python -c "import pathlib, re; m = re.search(r'^version\s*=\s*\"([^\"]+)\"', pathlib.Path('pyproject.toml').read_text(), re.M); print(m.group(1) if m else '')")
+          if [ -z "$pkg_version" ]; then
+            echo "::error ::Could not read [project].version from pyproject.toml"
+            exit 1
+          fi
           if [ "$tag" != "$pkg_version" ]; then
             echo "::error ::Tag v$tag does not match pyproject.toml version $pkg_version"
             exit 1

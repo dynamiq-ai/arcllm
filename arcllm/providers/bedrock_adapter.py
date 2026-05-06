@@ -126,8 +126,10 @@ class BedrockAdapter(BaseAdapter):
         host = parsed.hostname or ""
         path = parsed.path or "/"
 
-        # Current time (timezone-aware UTC)
-        now = datetime.datetime.now(datetime.UTC)
+        # Current time (timezone-aware UTC).
+        # NB: ``datetime.UTC`` is 3.11+; use ``timezone.utc`` so the floor
+        # stays at Python 3.10.
+        now = datetime.datetime.now(datetime.timezone.utc)
         amz_date = now.strftime("%Y%m%dT%H%M%SZ")
         date_stamp = now.strftime("%Y%m%d")
 

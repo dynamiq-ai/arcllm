@@ -46,7 +46,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # 3.10 is the floor we support; 3.12/3.13 are the active CPython
+        # release-and-current. 3.11 is implicitly compatible (no 3.11-only
+        # features used) but omitted from CI to save minutes.
+        python-version: ["3.10", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
