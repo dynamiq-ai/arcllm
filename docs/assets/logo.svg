@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 140" role="img" aria-label="arcllm">
+  <!--
+    arcllm logo — neutral variant. Used as the fallback in any context that
+    can't pick between logo-light.svg / logo-dark.svg via <picture>.
+
+    The wordmark uses a mid-tone slate that stays legible on both light and
+    dark backgrounds; for crisper contrast prefer logo-light.svg /
+    logo-dark.svg with a <picture> tag.
+  -->
+  <g stroke="#06B6D4" stroke-width="11" stroke-linecap="square" stroke-linejoin="miter" fill="none">
+    <path d="M 22 116 L 70 22 L 118 116" />
+    <path d="M 46 78 L 94 78" />
+  </g>
+  <text x="156" y="100"
+        font-family="ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace"
+        font-size="76" font-weight="700" letter-spacing="-3">
+    <tspan fill="#06B6D4">arc</tspan><tspan fill="#64748B">llm</tspan>
+  </text>
+</svg>

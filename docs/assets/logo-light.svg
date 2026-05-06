@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 140" role="img" aria-label="arcllm">
+  <!--
+    arcllm logo — light-theme variant.
+
+    Mark: a sharp angular arc — two diagonal strokes meeting at a peak, with
+    a short horizontal connector that ties the legs together. Reads as both
+    an upper-case "A" and a stylised arc bridging two endpoints.
+
+    Wordmark: "arcllm" in a tight monospace, 'arc' rendered in the same
+    accent color as the mark to anchor the brand.
+  -->
+  <g stroke="#06B6D4" stroke-width="11" stroke-linecap="square" stroke-linejoin="miter" fill="none">
+    <path d="M 22 116 L 70 22 L 118 116" />
+    <path d="M 46 78 L 94 78" />
+  </g>
+  <text x="156" y="100"
+        font-family="ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace"
+        font-size="76" font-weight="700" letter-spacing="-3">
+    <tspan fill="#06B6D4">arc</tspan><tspan fill="#0F172A">llm</tspan>
+  </text>
+</svg>

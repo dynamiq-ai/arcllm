@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 140" role="img" aria-label="arcllm">
+  <!--
+    arcllm logo — dark-theme variant.
+
+    Same geometry as logo-light.svg; the "llm" portion of the wordmark uses
+    near-white instead of near-black so it reads on dark GitHub backgrounds.
+  -->
+  <g stroke="#22D3EE" stroke-width="11" stroke-linecap="square" stroke-linejoin="miter" fill="none">
+    <path d="M 22 116 L 70 22 L 118 116" />
+    <path d="M 46 78 L 94 78" />
+  </g>
+  <text x="156" y="100"
+        font-family="ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace"
+        font-size="76" font-weight="700" letter-spacing="-3">
+    <tspan fill="#22D3EE">arc</tspan><tspan fill="#F8FAFC">llm</tspan>
+  </text>
+</svg>
