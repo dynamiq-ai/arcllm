@@ -75,6 +75,11 @@ SUPPORTED_PROVIDERS = [
     "ai21",
     "azure_ai",
     "custom",
+    # Production push: 4 OpenAI-compat additions
+    "nebius",
+    "ovhcloud",
+    "zai",
+    "moonshot",
 ]
 
 
@@ -727,6 +732,11 @@ _PROVIDER_MODULES: dict[str, tuple[str, str]] = {
     "ai21": ("arcllm.providers.ai21_adapter", "AI21Adapter"),
     "azure_ai": ("arcllm.providers.azure_adapter", "AzureOpenAIAdapter"),
     "custom": ("arcllm.providers.custom_adapter", "CustomAdapter"),
+    # Production push (0.4): 4 more OpenAI-compatible providers
+    "nebius": ("arcllm.providers.nebius_adapter", "NebiusAdapter"),
+    "ovhcloud": ("arcllm.providers.ovhcloud_adapter", "OVHCloudAdapter"),
+    "zai": ("arcllm.providers.zai_adapter", "ZAIAdapter"),
+    "moonshot": ("arcllm.providers.moonshot_adapter", "MoonshotAdapter"),
 }
 
 
@@ -901,6 +911,36 @@ def register_all_providers() -> None:
         from arcllm.providers import deepinfra_adapter
 
         register_provider("deepinfra", deepinfra_adapter.DeepInfraAdapter)
+    except ImportError:
+        pass
+
+    # Production push (0.4): Nebius, OVHcloud, Z.AI, Moonshot — all
+    # OpenAI-compatible chat providers, thin subclasses of OpenAIAdapter.
+    try:
+        from arcllm.providers import nebius_adapter
+
+        register_provider("nebius", nebius_adapter.NebiusAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import ovhcloud_adapter
+
+        register_provider("ovhcloud", ovhcloud_adapter.OVHCloudAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import zai_adapter
+
+        register_provider("zai", zai_adapter.ZAIAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import moonshot_adapter
+
+        register_provider("moonshot", moonshot_adapter.MoonshotAdapter)
     except ImportError:
         pass
 
