@@ -1,24 +1,28 @@
 """
 Azure adapter for arcllm.
 
-Azure exposes two distinct serving surfaces, both reachable through this adapter:
+Azure exposes two distinct serving surfaces, both reachable through this
+adapter (registered as ``azure`` and aliased as ``azure_ai``):
 
-- **Azure OpenAI Service**: GPT-5/4o/4.1, o-series reasoning, and OpenAI
-  embeddings. Endpoint pattern
-  ``{resource}.openai.azure.com/openai/deployments/{deployment}/...``.
-- **Azure AI Foundry serverless**: Phi, Llama, Cohere, Mistral, etc. on the
-  unified ``/models/chat/completions?api-version=...`` endpoint. Wire format
-  is OpenAI-compatible (Azure normalised it across vendors).
+- **Azure OpenAI Service** — GPT-5 / 4o / 4.1, o-series reasoning, OpenAI
+  embeddings. Hosted at ``{resource}.openai.azure.com``; URL pattern
+  ``/openai/deployments/{deployment}/chat/completions?api-version=...``.
+- **Azure AI Foundry serverless** — Phi, Llama, Cohere, Mistral, etc. on
+  the unified ``/models/chat/completions?api-version=...`` endpoint at
+  ``{resource}.services.ai.azure.com``. Wire format is OpenAI-compatible
+  (Azure normalised it across vendors).
 
-Family detection: model ids beginning with ``gpt-`` / ``o1`` / ``o3`` / ``o4`` /
-``text-embedding-`` route through Azure OpenAI; everything else routes through
-Foundry. Override by setting ``api_base`` explicitly.
+Surface dispatch is **host-first**: the configured ``api_base`` host
+suffix decides which URL pattern to build. A model-name prefix sniff
+covers the rare case of an unfamiliar host (e.g. private endpoints
+without a canonical Azure hostname).
 """
 
 from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 import orjson
 
@@ -46,11 +50,29 @@ _OPENAI_FAMILY_PREFIXES = (
 )
 
 
-def _is_azure_openai_model(model: str) -> bool:
-    """True for OpenAI models hosted on Azure OpenAI Service.
+def _is_foundry_host(api_base: str | None) -> bool:
+    """True if ``api_base`` points at an Azure AI Foundry endpoint.
 
-    Defaults the rest to Azure AI Foundry, which speaks the same OpenAI
-    Chat Completions wire format on a different endpoint path.
+    Foundry serverless URLs end in ``.services.ai.azure.com``; the
+    OpenAI-Service style ends in ``.openai.azure.com``. Host-based
+    detection is more reliable than model-prefix sniffing because users
+    can deploy custom-named OpenAI Service models (e.g. fine-tuned
+    ``my-gpt`` deployments) that wouldn't match a static prefix list.
+    """
+    if not api_base:
+        return False
+    try:
+        host = urlparse(api_base).hostname or ""
+    except (ValueError, AttributeError):
+        return False
+    return host.endswith(".services.ai.azure.com")
+
+
+def _is_azure_openai_model(model: str) -> bool:
+    """Fallback: True for OpenAI-named models when host detection is ambiguous.
+
+    Used only when the configured ``api_base`` doesn't disclose which
+    Azure surface we're hitting (rare — usually the host gives it away).
     """
     m = model.lower()
     return any(m.startswith(p) for p in _OPENAI_FAMILY_PREFIXES)
@@ -185,23 +207,38 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         )
 
     def _chat_url(self, model: str) -> str:
-        """Resolve the chat-completions URL for ``model`` per Azure family."""
+        """Resolve the chat-completions URL for ``model`` per Azure family.
+
+        Detection order (most-reliable first):
+
+        1. **Host suffix** — ``.services.ai.azure.com`` is unambiguously
+           Foundry; ``.openai.azure.com`` is unambiguously OpenAI Service.
+           Custom-deployed model names (e.g. fine-tunes called ``my-gpt``)
+           don't fool this check.
+        2. **Model-name fallback** — when the host is unfamiliar, fall
+           back to the legacy prefix sniff. Used only for callers that
+           point at a private endpoint without one of the canonical
+           Azure suffixes.
+        """
         api_base = self._get_api_base()
-        if _is_azure_openai_model(model):
+        if _is_foundry_host(api_base):
+            return f"{api_base}/models/chat/completions?api-version={self._api_version}"
+        if _is_azure_openai_model(model) or "openai.azure.com" in (api_base or ""):
             deployment = self._get_deployment(model)
             return (
                 f"{api_base}/openai/deployments/{deployment}"
                 f"/chat/completions?api-version={self._api_version}"
             )
-        # Azure AI Foundry serverless. The endpoint is unified: the model id
-        # goes in the body, not the URL. Some Foundry deployments still want
-        # an api-version query — we pass ours along.
+        # Unknown host + non-OpenAI model name → assume Foundry (the
+        # body-driven route works on most private deployments).
         return f"{api_base}/models/chat/completions?api-version={self._api_version}"
 
     def _embedding_url(self, model: str) -> str:
-        """Resolve the embeddings URL for ``model`` per Azure family."""
+        """Resolve the embeddings URL for ``model`` — same dispatch as ``_chat_url``."""
         api_base = self._get_api_base()
-        if _is_azure_openai_model(model):
+        if _is_foundry_host(api_base):
+            return f"{api_base}/models/embeddings?api-version={self._api_version}"
+        if _is_azure_openai_model(model) or "openai.azure.com" in (api_base or ""):
             deployment = self._get_deployment(model)
             return (
                 f"{api_base}/openai/deployments/{deployment}"
