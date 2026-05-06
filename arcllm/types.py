@@ -16,6 +16,47 @@ import msgspec
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+
+class _DictLike:
+    """Litellm-compat mixin: lets ``msgspec.Struct`` types double as
+    dict-like records.
+
+    Litellm's response classes inherit from a Pydantic base that
+    transparently supports both attribute and item access — call sites
+    routinely do ``response["data"]`` *and* ``response.data``
+    interchangeably, often inside test fixtures that set fields after
+    construction. This mixin gives arcllm's strongly-typed
+    ``msgspec.Struct`` types the same surface so a litellm-trained
+    caller can keep working unchanged.
+
+    The mixin only forwards key access to the underlying attributes —
+    msgspec's type validation still applies to the canonical attribute
+    path. ``__setitem__`` calls ``setattr`` directly, which lets
+    fixtures populate fields with whatever shape the test wants
+    (mirrors litellm's loose typing).
+    """
+
+    __slots__ = ()
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError as exc:
+            raise KeyError(key) from exc
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        # No type validation: this is the loose-typing escape hatch for
+        # tests / litellm-style fixtures. Real provider code uses the
+        # canonical Struct constructor and gets full type checking.
+        setattr(self, key, value)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key) and getattr(self, key) is not None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
 __all__ = [
     "Choice",
     "ChunkChoice",
@@ -49,7 +90,7 @@ __all__ = [
 # =============================================================================
 
 
-class FunctionCall(msgspec.Struct):
+class FunctionCall(_DictLike, msgspec.Struct):
     """Function call details within a tool call."""
 
     name: str
@@ -68,7 +109,7 @@ class FunctionCall(msgspec.Struct):
         return {"name": self.name, "arguments": self.arguments}
 
 
-class ToolCall(msgspec.Struct):
+class ToolCall(_DictLike, msgspec.Struct):
     """A tool call from the model response."""
 
     id: str
@@ -83,7 +124,7 @@ class ToolCall(msgspec.Struct):
         return result
 
 
-class Citation(msgspec.Struct):
+class Citation(_DictLike, msgspec.Struct):
     """A single source citation attached to a model response.
 
     Different providers populate different subsets:
@@ -123,7 +164,7 @@ class Citation(msgspec.Struct):
 # =============================================================================
 
 
-class Message(msgspec.Struct):
+class Message(_DictLike, msgspec.Struct):
     """A message in a completion response."""
 
     role: str
@@ -158,7 +199,7 @@ class Message(msgspec.Struct):
 # =============================================================================
 
 
-class Usage(msgspec.Struct):
+class Usage(_DictLike, msgspec.Struct):
     """Token usage information from the provider.
 
     Cache-related fields (``cache_read_input_tokens`` /
@@ -205,7 +246,7 @@ class Usage(msgspec.Struct):
 # =============================================================================
 
 
-class Choice(msgspec.Struct):
+class Choice(_DictLike, msgspec.Struct):
     """A single choice in a completion response."""
 
     index: int
@@ -231,7 +272,7 @@ class Choice(msgspec.Struct):
 # =============================================================================
 
 
-class ModelResponse(msgspec.Struct):
+class ModelResponse(_DictLike, msgspec.Struct):
     """
     The unified response from a completion call.
 
@@ -272,7 +313,7 @@ class ModelResponse(msgspec.Struct):
 # =============================================================================
 
 
-class ChunkDelta(msgspec.Struct):
+class ChunkDelta(_DictLike, msgspec.Struct):
     """Delta content in a streaming chunk."""
 
     role: str | None = None
@@ -300,7 +341,7 @@ class ChunkDelta(msgspec.Struct):
         return result
 
 
-class ChunkChoice(msgspec.Struct):
+class ChunkChoice(_DictLike, msgspec.Struct):
     """A single choice in a streaming chunk."""
 
     index: int
@@ -321,7 +362,7 @@ class ChunkChoice(msgspec.Struct):
         return result
 
 
-class StreamChunk(msgspec.Struct):
+class StreamChunk(_DictLike, msgspec.Struct):
     """A single chunk in a streaming response."""
 
     id: str
@@ -396,7 +437,7 @@ class StreamingResponse:
 # =============================================================================
 
 
-class EmbeddingUsage(msgspec.Struct):
+class EmbeddingUsage(_DictLike, msgspec.Struct):
     """Usage information for embedding requests."""
 
     prompt_tokens: int = 0
@@ -410,7 +451,7 @@ class EmbeddingUsage(msgspec.Struct):
         }
 
 
-class EmbeddingData(msgspec.Struct):
+class EmbeddingData(_DictLike, msgspec.Struct):
     """A single embedding result."""
 
     index: int
@@ -426,7 +467,7 @@ class EmbeddingData(msgspec.Struct):
         }
 
 
-class EmbeddingResponse(msgspec.Struct):
+class EmbeddingResponse(_DictLike, msgspec.Struct):
     """Response from an embedding request.
 
     All fields default — matches the litellm-compat contract where test
@@ -455,7 +496,7 @@ class EmbeddingResponse(msgspec.Struct):
 # =============================================================================
 
 
-class ImageData(msgspec.Struct):
+class ImageData(_DictLike, msgspec.Struct):
     """A single generated image returned by the provider.
 
     Either ``url`` or ``b64_json`` is set, depending on ``response_format``
@@ -479,7 +520,7 @@ class ImageData(msgspec.Struct):
         return result
 
 
-class ImageResponse(msgspec.Struct):
+class ImageResponse(_DictLike, msgspec.Struct):
     """Response from an image generation / variation / edit request."""
 
     created: int
@@ -499,7 +540,7 @@ class ImageResponse(msgspec.Struct):
 # =============================================================================
 
 
-class RerankResult(msgspec.Struct):
+class RerankResult(_DictLike, msgspec.Struct):
     """A single reranked document hit.
 
     ``index`` is the 0-based position of this document in the ``documents``
@@ -520,7 +561,7 @@ class RerankResult(msgspec.Struct):
         return result
 
 
-class RerankResponse(msgspec.Struct):
+class RerankResponse(_DictLike, msgspec.Struct):
     """Response from a rerank request.
 
     ``results`` is sorted by descending relevance.
