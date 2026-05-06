@@ -43,17 +43,23 @@ def numeric_lookups() -> None:
 
 
 def full_model_info() -> None:
-    """Litellm-compat ``get_model_info`` returns capability + pricing combined."""
+    """Litellm-compat ``get_model_info`` returns capability + pricing combined.
+
+    The dict shape mirrors litellm's: per-token costs (``$/token``, not
+    ``$/M tokens``) and the ``supports_function_calling`` /
+    ``supports_response_schema`` litellm-style flag names. See
+    :func:`arcllm.get_model_info` for the canonical schema.
+    """
     info = arcllm.get_model_info("gpt-4o")
     print("\nget_model_info('gpt-4o'):")
     for k in (
         "max_input_tokens",
         "max_output_tokens",
         "supports_vision",
-        "supports_tools",
-        "supports_structured_output",
-        "input_cost_per_million",
-        "output_cost_per_million",
+        "supports_function_calling",
+        "supports_response_schema",
+        "input_cost_per_token",
+        "output_cost_per_token",
     ):
         if k in info:
             print(f"  {k}: {info[k]}")
