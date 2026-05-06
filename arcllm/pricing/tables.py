@@ -665,6 +665,113 @@ AI21_PRICING: dict[str, ModelPricing] = {
     "jamba-1.5-mini": ModelPricing(0.2, 0.4),
 }
 
+# =============================================================================
+# nebius
+# =============================================================================
+NEBIUS_PRICING: dict[str, ModelPricing] = {
+    "deepseek-ai/DeepSeek-R1": ModelPricing(0.8, 2.4),
+    "deepseek-ai/DeepSeek-R1-0528": ModelPricing(0.8, 2.4),
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-70B": ModelPricing(0.25, 0.75),
+    "deepseek-ai/DeepSeek-V3": ModelPricing(0.5, 1.5),
+    "deepseek-ai/DeepSeek-V3-0324": ModelPricing(0.5, 1.5),
+    "google/gemma-3-27b-it": ModelPricing(0.06, 0.2),
+    "meta-llama/Llama-3.3-70B-Instruct": ModelPricing(0.13, 0.4),
+    "meta-llama/Llama-Guard-3-8B": ModelPricing(0.02, 0.06),
+    "meta-llama/Meta-Llama-3.1-8B-Instruct": ModelPricing(0.02, 0.06),
+    "meta-llama/Meta-Llama-3.1-70B-Instruct": ModelPricing(0.13, 0.4),
+    "meta-llama/Meta-Llama-3.1-405B-Instruct": ModelPricing(1.0, 3.0),
+    "mistralai/Mistral-Nemo-Instruct-2407": ModelPricing(0.04, 0.12),
+    "NousResearch/Hermes-3-Llama-3.1-405B": ModelPricing(1.0, 3.0),
+    "nvidia/Llama-3.1-Nemotron-Ultra-253B-v1": ModelPricing(0.6, 1.8),
+    "nvidia/Llama-3.3-Nemotron-Super-49B-v1": ModelPricing(0.1, 0.4),
+    "Qwen/Qwen3-235B-A22B": ModelPricing(0.2, 0.6),
+    "Qwen/Qwen3-32B": ModelPricing(0.1, 0.3),
+    "Qwen/Qwen3-30B-A3B": ModelPricing(0.1, 0.3),
+    "Qwen/Qwen3-14B": ModelPricing(0.08, 0.24),
+    "Qwen/Qwen3-4B": ModelPricing(0.08, 0.24),
+    "Qwen/QwQ-32B": ModelPricing(0.15, 0.45),
+    "Qwen/Qwen2.5-72B-Instruct": ModelPricing(0.13, 0.4),
+    "Qwen/Qwen2.5-32B-Instruct": ModelPricing(0.06, 0.2),
+    "Qwen/Qwen2.5-Coder-7B": ModelPricing(0.01, 0.03),
+    "Qwen/Qwen2.5-VL-72B-Instruct": ModelPricing(0.13, 0.4),
+    "Qwen/Qwen2-VL-72B-Instruct": ModelPricing(0.13, 0.4),
+    "Qwen/Qwen2-VL-7B-Instruct": ModelPricing(0.02, 0.06),
+    "BAAI/bge-en-icl": ModelPricing(0.01, 0.0),
+    "BAAI/bge-multilingual-gemma2": ModelPricing(0.01, 0.0),
+    "intfloat/e5-mistral-7b-instruct": ModelPricing(0.01, 0.0),
+}
+
+# =============================================================================
+# ovhcloud
+# =============================================================================
+OVHCLOUD_PRICING: dict[str, ModelPricing] = {
+    "Meta-Llama-3_3-70B-Instruct": ModelPricing(0.67, 0.67),
+    "Llama-3.1-8B-Instruct": ModelPricing(0.1, 0.1),
+    "DeepSeek-R1-Distill-Llama-70B": ModelPricing(0.67, 0.67),
+    "Mistral-Nemo-Instruct-2407": ModelPricing(0.13, 0.13),
+    "Mistral-Small-3.2-24B-Instruct-2506": ModelPricing(0.09, 0.28),
+    "Mistral-7B-Instruct-v0.3": ModelPricing(0.1, 0.1),
+    "Mixtral-8x7B-Instruct-v0.1": ModelPricing(0.63, 0.63),
+    "gpt-oss-120b": ModelPricing(0.08, 0.4),
+    "gpt-oss-20b": ModelPricing(0.04, 0.15),
+    "Qwen3-32B": ModelPricing(0.08, 0.23),
+    "Qwen3.5-9B": ModelPricing(0.1, 0.15),
+    "Qwen3-Coder-30B-A3B-Instruct": ModelPricing(0.06, 0.22),
+    "Qwen2.5-VL-72B-Instruct": ModelPricing(0.91, 0.91),
+    "Meta-Llama-3_1-70B-Instruct": ModelPricing(0.67, 0.67),
+    "Qwen2.5-Coder-32B-Instruct": ModelPricing(0.87, 0.87),
+    "llava-v1.6-mistral-7b-hf": ModelPricing(0.29, 0.29),
+    "mamba-codestral-7B-v0.1": ModelPricing(0.19, 0.19),
+    "bge-multilingual-gemma2": ModelPricing(0.01, 0.0),
+    "bge-m3": ModelPricing(0.01, 0.0),
+    "Qwen3-Embedding-8B": ModelPricing(0.1, 0.0),
+}
+
+# =============================================================================
+# zai
+# =============================================================================
+ZAI_PRICING: dict[str, ModelPricing] = {
+    "glm-5": ModelPricing(1.0, 3.2, 0.2),
+    "glm-5-code": ModelPricing(1.2, 5.0, 0.3),
+    "glm-4.7": ModelPricing(0.6, 2.2, 0.11),
+    "glm-4.6": ModelPricing(0.6, 2.2, 0.11),
+    "glm-4.5": ModelPricing(0.6, 2.2),
+    "glm-4.5v": ModelPricing(0.6, 1.8),
+    "glm-4.5-x": ModelPricing(2.2, 8.9),
+    "glm-4.5-air": ModelPricing(0.2, 1.1),
+    "glm-4.5-airx": ModelPricing(1.1, 4.5),
+    "glm-4.5-flash": ModelPricing(0.0, 0.0),
+    "glm-4-32b-0414-128k": ModelPricing(0.1, 0.1),
+}
+
+# =============================================================================
+# moonshot
+# =============================================================================
+MOONSHOT_PRICING: dict[str, ModelPricing] = {
+    "kimi-k2.5": ModelPricing(0.6, 3.0, 0.1),
+    "kimi-k2.6": ModelPricing(0.95, 4.0, 0.16),
+    "kimi-latest": ModelPricing(2.0, 5.0, 0.15),
+    "kimi-latest-128k": ModelPricing(2.0, 5.0, 0.15),
+    "kimi-latest-32k": ModelPricing(1.0, 3.0, 0.15),
+    "kimi-latest-8k": ModelPricing(0.2, 2.0, 0.15),
+    "kimi-thinking-preview": ModelPricing(0.6, 2.5, 0.15),
+    "kimi-k2-thinking": ModelPricing(0.6, 2.5, 0.15),
+    "kimi-k2-thinking-turbo": ModelPricing(1.15, 8.0, 0.15),
+    "kimi-k2-0711-preview": ModelPricing(0.6, 2.5, 0.15),
+    "kimi-k2-0905-preview": ModelPricing(0.6, 2.5, 0.15),
+    "kimi-k2-turbo-preview": ModelPricing(1.15, 8.0, 0.15),
+    "moonshot-v1-8k": ModelPricing(0.2, 2.0),
+    "moonshot-v1-32k": ModelPricing(1.0, 3.0),
+    "moonshot-v1-128k": ModelPricing(2.0, 5.0),
+    "moonshot-v1-8k-0430": ModelPricing(0.2, 2.0),
+    "moonshot-v1-32k-0430": ModelPricing(1.0, 3.0),
+    "moonshot-v1-128k-0430": ModelPricing(2.0, 5.0),
+    "moonshot-v1-8k-vision-preview": ModelPricing(0.2, 2.0),
+    "moonshot-v1-32k-vision-preview": ModelPricing(1.0, 3.0),
+    "moonshot-v1-128k-vision-preview": ModelPricing(2.0, 5.0),
+    "moonshot-v1-auto": ModelPricing(2.0, 5.0),
+}
+
 
 ALL_PRICING: dict[str, dict[str, ModelPricing]] = {
     "openai": OPENAI_PRICING,
@@ -691,6 +798,10 @@ ALL_PRICING: dict[str, dict[str, ModelPricing]] = {
     "huggingface": HUGGINGFACE_PRICING,
     "watsonx": WATSONX_PRICING,
     "ai21": AI21_PRICING,
+    "nebius": NEBIUS_PRICING,
+    "ovhcloud": OVHCLOUD_PRICING,
+    "zai": ZAI_PRICING,
+    "moonshot": MOONSHOT_PRICING,
 }
 
 

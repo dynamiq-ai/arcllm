@@ -68,6 +68,11 @@ PROVIDERS = [
     "huggingface",
     "watsonx",
     "ai21",
+    # Production push
+    "nebius",
+    "ovhcloud",
+    "zai",
+    "moonshot",
 ]
 
 # Module-level variable name suffix per provider. The provider key (used in
@@ -102,6 +107,11 @@ VAR_NAME = {
     "huggingface": "HUGGINGFACE",
     "watsonx": "WATSONX",
     "ai21": "AI21",
+    # Production push
+    "nebius": "NEBIUS",
+    "ovhcloud": "OVHCLOUD",
+    "zai": "ZAI",
+    "moonshot": "MOONSHOT",
 }
 
 
