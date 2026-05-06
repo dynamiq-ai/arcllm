@@ -192,7 +192,7 @@ def main() -> int:
     print("\n=== Manual review checklist ===")
     print(
         "  - dynamiq/pyproject.toml: replace `litellm = ...` with "
-        "`arcllm = '>=0.4.0,<0.5'` (and remove litellm)."
+        "`arcllm-sdk = '>=0.4.0,<0.5'` (and remove litellm)."
     )
     print(
         "  - dynamiq/nodes/llms/replicate.py + tests: arcllm 0.4 does NOT yet ship "

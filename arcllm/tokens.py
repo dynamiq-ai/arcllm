@@ -5,7 +5,7 @@ Provides :func:`token_counter` as a drop-in for ``litellm.token_counter``.
 
 Resolution order:
 
-1. If `tiktoken` is installed (via ``pip install arcllm[tokenize]``) AND the
+1. If `tiktoken` is installed (via ``pip install arcllm-sdk[tokenize]``) AND the
    model belongs to the OpenAI / Azure / Groq / Together / Fireworks /
    DeepSeek / Perplexity family — use the appropriate ``tiktoken`` encoder.
 2. Otherwise — fall back to a chars/4 heuristic per OpenAI's published rule
@@ -35,7 +35,7 @@ def _warn_heuristic_once(model: str) -> None:
     warnings.warn(
         f"arcllm.token_counter: tiktoken not installed; falling back to a "
         f"chars/4 heuristic for model {model!r}. "
-        f"Install `arcllm[tokenize]` for accurate counts.",
+        f"Install `arcllm-sdk[tokenize]` for accurate counts.",
         UserWarning,
         stacklevel=3,
     )
@@ -156,7 +156,7 @@ def token_counter(
 
     Pass either ``messages`` (OpenAI-shape list) or ``text`` (raw string).
     Returns the best-available count: tiktoken-precise for OpenAI-family
-    models when ``arcllm[tokenize]`` is installed, otherwise a chars/4
+    models when ``arcllm-sdk[tokenize]`` is installed, otherwise a chars/4
     heuristic with a one-time warning.
 
     Raises ``ValueError`` if both ``messages`` and ``text`` are missing.

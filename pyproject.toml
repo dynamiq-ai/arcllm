@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "arcllm"
+name = "arcllm-sdk"
 version = "0.4.0"
 description = "The arc connecting you to every LLM. Minimal dependencies, maximum performance."
 readme = "README.md"
