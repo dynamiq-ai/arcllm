@@ -312,3 +312,59 @@ class TestEmbedding:
         dumped = data.model_dump()
         assert dumped["index"] == 0
         assert dumped["embedding"] == [0.1, 0.2]
+
+
+class TestDictLikeAccess:
+    """Litellm-compat: every msgspec.Struct response type must support
+    both attribute and item access. Litellm's Pydantic models supported
+    this transparently; arcllm's _DictLike mixin restores parity for
+    drop-in callers (notably dynamiq's test fixtures that assemble
+    response objects with dict-style assignment).
+    """
+
+    def test_embedding_response_item_set_and_get(self):
+        from arcllm.types import EmbeddingResponse
+
+        response = EmbeddingResponse()
+        response["data"] = [{"embedding": [0.1, 0.2, 0.3]}]
+        response["model"] = "text-embedding-3-small"
+        assert response["data"] == [{"embedding": [0.1, 0.2, 0.3]}]
+        assert response["model"] == "text-embedding-3-small"
+        # Attribute access keeps working too.
+        assert response.data == [{"embedding": [0.1, 0.2, 0.3]}]
+        assert response.model == "text-embedding-3-small"
+
+    def test_model_response_item_access(self):
+        from arcllm.types import ModelResponse
+
+        # ``id`` has no default — mimics how a provider populates the
+        # canonical response. Item access is for fields fixtures want
+        # to override after construction.
+        response = ModelResponse(id="resp_1")
+        response["model"] = "gpt-4o"
+        assert response["model"] == response.model == "gpt-4o"
+
+    def test_get_returns_default(self):
+        from arcllm.types import EmbeddingResponse
+
+        response = EmbeddingResponse()
+        assert response.get("nonexistent_field", "default-value") == "default-value"
+
+    def test_contains_checks_set_fields(self):
+        from arcllm.types import EmbeddingResponse
+
+        response = EmbeddingResponse()
+        # ``object`` is always set (default "list"); ``usage`` defaults to None
+        assert "object" in response
+        assert "usage" not in response
+        response["usage"] = "anything"
+        assert "usage" in response
+
+    def test_unknown_key_raises_keyerror(self):
+        import pytest
+
+        from arcllm.types import EmbeddingResponse
+
+        response = EmbeddingResponse()
+        with pytest.raises(KeyError):
+            _ = response["does_not_exist"]
