@@ -79,7 +79,7 @@ def test_watsonx_chat_request_renames_model_to_model_id(
 ) -> None:
     monkeypatch.setenv("WATSONX_PROJECT_ID", "test-project")
     adapter = WatsonXAdapter(
-        ProviderConfig(api_key="iam-token", api_base="https://us-south.ml.cloud.ibm.com")
+        ProviderConfig(api_key="eyJ.fake-iam.token", api_base="https://us-south.ml.cloud.ibm.com")
     )
     req = adapter.build_request(
         model="ibm/granite-13b-chat-v2",
@@ -101,7 +101,7 @@ def test_watsonx_chat_request_renames_model_to_model_id(
 def test_watsonx_explicit_kwarg_project_id_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WATSONX_PROJECT_ID", "env-project")
     adapter = WatsonXAdapter(
-        ProviderConfig(api_key="iam", api_base="https://us-south.ml.cloud.ibm.com")
+        ProviderConfig(api_key="eyJ.fake-iam.token", api_base="https://us-south.ml.cloud.ibm.com")
     )
     req = adapter.build_request(
         model="ibm/granite-13b-chat-v2",
@@ -116,7 +116,7 @@ def test_watsonx_space_id_alternative(monkeypatch: pytest.MonkeyPatch) -> None:
     """``space_id`` may be supplied instead of ``project_id``."""
     monkeypatch.delenv("WATSONX_PROJECT_ID", raising=False)
     adapter = WatsonXAdapter(
-        ProviderConfig(api_key="iam", api_base="https://us-south.ml.cloud.ibm.com")
+        ProviderConfig(api_key="eyJ.fake-iam.token", api_base="https://us-south.ml.cloud.ibm.com")
     )
     req = adapter.build_request(
         model="ibm/granite-13b-chat-v2",
@@ -132,7 +132,7 @@ def test_watsonx_missing_project_or_space_raises(monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("WATSONX_PROJECT_ID", raising=False)
     monkeypatch.delenv("WATSONX_SPACE_ID", raising=False)
     adapter = WatsonXAdapter(
-        ProviderConfig(api_key="iam", api_base="https://us-south.ml.cloud.ibm.com")
+        ProviderConfig(api_key="eyJ.fake-iam.token", api_base="https://us-south.ml.cloud.ibm.com")
     )
     with pytest.raises(InvalidRequestError, match="project_id"):
         adapter.build_request(
@@ -145,13 +145,83 @@ def test_watsonx_api_version_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WATSONX_PROJECT_ID", "p")
     monkeypatch.setenv("WATSONX_API_VERSION", "2025-01-01")
     adapter = WatsonXAdapter(
-        ProviderConfig(api_key="iam", api_base="https://us-south.ml.cloud.ibm.com")
+        ProviderConfig(api_key="eyJ.fake-iam.token", api_base="https://us-south.ml.cloud.ibm.com")
     )
     req = adapter.build_request(
         model="ibm/granite-13b-chat-v2",
         messages=[{"role": "user", "content": "hi"}],
     )
     assert "version=2025-01-01" in req.url
+
+
+def test_watsonx_jwt_token_bypasses_iam_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pre-exchanged IAM access token (JWT-shaped) is used verbatim."""
+    monkeypatch.setenv("WATSONX_PROJECT_ID", "p")
+    adapter = WatsonXAdapter(
+        ProviderConfig(api_key="eyJ.real.iamtoken", api_base="https://us-south.ml.cloud.ibm.com")
+    )
+
+    def boom(*args: object, **kwargs: object) -> None:  # pragma: no cover
+        raise AssertionError("IAM exchange should NOT be called for JWT tokens")
+
+    monkeypatch.setattr(adapter, "_exchange_apikey_for_iam_token", boom)
+    headers = adapter._build_headers()
+    assert headers["Authorization"] == "Bearer eyJ.real.iamtoken"
+
+
+def test_watsonx_raw_apikey_triggers_iam_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raw IBM Cloud API keys are exchanged for an IAM token, then cached."""
+    import time as time_mod
+
+    monkeypatch.setenv("WATSONX_PROJECT_ID", "p")
+    adapter = WatsonXAdapter(
+        ProviderConfig(api_key="raw-apikey-abc", api_base="https://us-south.ml.cloud.ibm.com")
+    )
+
+    calls: list[str] = []
+
+    def fake_exchange(apikey: str) -> tuple[str, float]:
+        calls.append(apikey)
+        return "eyJ.exchanged.token", time_mod.time() + 3600
+
+    monkeypatch.setattr(adapter, "_exchange_apikey_for_iam_token", fake_exchange)
+    h1 = adapter._build_headers()
+    h2 = adapter._build_headers()
+    assert h1["Authorization"] == "Bearer eyJ.exchanged.token"
+    assert h2["Authorization"] == "Bearer eyJ.exchanged.token"
+    # Token cache: only one exchange call even across multiple header builds.
+    assert len(calls) == 1
+    assert calls[0] == "raw-apikey-abc"
+
+
+def test_watsonx_iam_token_refreshes_on_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once the cached IAM token has expired, the adapter re-exchanges."""
+    import time as time_mod
+
+    monkeypatch.setenv("WATSONX_PROJECT_ID", "p")
+    adapter = WatsonXAdapter(
+        ProviderConfig(api_key="raw-apikey-x", api_base="https://us-south.ml.cloud.ibm.com")
+    )
+
+    counter = {"n": 0}
+
+    def fake_exchange(apikey: str) -> tuple[str, float]:
+        counter["n"] += 1
+        # Token already past its refresh window so the next call re-exchanges.
+        return f"eyJ.token{counter['n']}", time_mod.time() - 1
+
+    monkeypatch.setattr(adapter, "_exchange_apikey_for_iam_token", fake_exchange)
+    h1 = adapter._build_headers()
+    h2 = adapter._build_headers()
+    assert h1["Authorization"] == "Bearer eyJ.token1"
+    assert h2["Authorization"] == "Bearer eyJ.token2"
+    assert counter["n"] == 2
 
 
 # --- AzureAI alias ----------------------------------------------------------

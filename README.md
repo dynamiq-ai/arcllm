@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/arcllm/"><img src="https://img.shields.io/pypi/v/arcllm?color=blue&label=PyPI" alt="PyPI"></a>
-  <a href="https://pypi.org/project/arcllm/"><img src="https://img.shields.io/pypi/pyversions/arcllm" alt="Python"></a>
+  <a href="https://pypi.org/project/arcllm-sdk/"><img src="https://img.shields.io/pypi/v/arcllm-sdk?color=blue&label=PyPI" alt="PyPI"></a>
+  <a href="https://pypi.org/project/arcllm-sdk/"><img src="https://img.shields.io/pypi/pyversions/arcllm-sdk" alt="Python"></a>
   <a href="https://github.com/dynamiq-ai/arcllm/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
   <a href="https://github.com/dynamiq-ai/arcllm/actions"><img src="https://img.shields.io/github/actions/workflow/status/dynamiq-ai/arcllm/ci.yml?branch=main" alt="CI"></a>
 </p>
@@ -42,7 +42,7 @@ Built for developers who want **speed**, **simplicity**, and **reliability** whe
 ## Installation
 
 ```bash
-pip install arcllm
+pip install arcllm-sdk
 ```
 
 ## Quick Start

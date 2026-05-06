@@ -193,7 +193,7 @@ from arcllm.pricing import (
 # Rerank surface (Cohere in 0.4; Voyage / Bedrock / Jina to follow)
 from arcllm.rerank import arerank, rerank
 
-# Token counting (heuristic by default; tiktoken-precise with `arcllm[tokenize]`)
+# Token counting (heuristic by default; tiktoken-precise with `arcllm-sdk[tokenize]`)
 from arcllm.tokens import token_counter
 
 # Providers are lazy-loaded when first accessed.
