@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/dynamiq-ai/arcllm/main/docs/assets/logo.svg" alt="ArcLLM" width="400">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/dynamiq-ai/arcllm/main/docs/assets/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/dynamiq-ai/arcllm/main/docs/assets/logo-light.svg" alt="arcllm" width="440">
+  </picture>
 </p>
 
 <h3 align="center">The arc connecting you to every LLM</h3>

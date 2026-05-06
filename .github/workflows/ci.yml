@@ -24,7 +24,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy pyright
+          # Install the package + dev + tokenize so mypy/pyright can resolve
+          # runtime deps (msgspec, httpx, aiohttp, orjson, tiktoken, ...).
+          pip install -e ".[dev,tokenize]"
 
       - name: Run ruff check
         run: ruff check arcllm tests
