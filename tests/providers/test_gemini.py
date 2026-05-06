@@ -119,6 +119,26 @@ class TestBuildRequest:
         # Gemini uses different endpoint for streaming
         assert "streamGenerateContent" in request.url
 
+    def test_build_request_with_thinking_config(self, adapter):
+        """``thinking_budget`` and ``include_thoughts`` map to Gemini's thinkingConfig.
+
+        Per https://ai.google.dev/gemini-api/docs/thinking, both fields live
+        under ``generationConfig.thinkingConfig``.
+        """
+        request = adapter.build_request(
+            model="gemini-2.5-pro",
+            messages=[{"role": "user", "content": "Hi"}],
+            thinking_budget=1024,
+            include_thoughts=True,
+        )
+
+        body = json.loads(request.body.decode("utf-8"))
+        gen_cfg = body["generationConfig"]
+        assert gen_cfg["thinkingConfig"] == {
+            "thinkingBudget": 1024,
+            "includeThoughts": True,
+        }
+
 
 class TestMessageConversion:
     """Tests for message conversion."""
@@ -328,14 +348,28 @@ class TestParseError:
         assert isinstance(error, AuthenticationError)
         assert "Invalid API key" in str(error)
 
-    def test_parse_429_error(self, adapter):
-        """Test parsing 429 rate limit error."""
+    def test_parse_429_rate_limit_error(self, adapter):
+        """A pure 429 with rate-limit wording maps to RateLimitError."""
+        error_data = json.dumps(
+            {"error": {"message": "Rate limit reached for project", "status": "RATE_LIMITED"}}
+        ).encode("utf-8")
+
+        error = adapter.parse_error(429, error_data, "req-123")
+        assert isinstance(error, RateLimitError)
+
+    def test_parse_429_quota_exhausted_maps_to_budget_exceeded(self, adapter):
+        """429 with quota wording is distinct from a rate limit — the
+        capability filter routes it to BudgetExceededError so callers can
+        treat it as billing rather than a transient retry."""
+        from arcllm.exceptions import BudgetExceededError
+
         error_data = json.dumps(
             {"error": {"message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}}
         ).encode("utf-8")
 
         error = adapter.parse_error(429, error_data, "req-123")
-        assert isinstance(error, RateLimitError)
+        assert isinstance(error, BudgetExceededError)
+        assert not isinstance(error, RateLimitError)
 
     def test_parse_non_json_error(self, adapter):
         """Test parsing non-JSON error response."""

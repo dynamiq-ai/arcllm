@@ -118,3 +118,9 @@ benchmark-ci-results.json
 # uv
 .uv/
 uv.lock
+
+# Vendored read-only references (e.g. litellm cross-check source)
+vendor/
+
+# Working tmp dir for model manifests, agent outputs, scratch JSON
+tmp/

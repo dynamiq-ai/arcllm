@@ -188,7 +188,9 @@ class TestPerplexityIntegration(IntegrationTestBase):
         response = self.retry_on_rate_limit(
             completion,
             model=f"{self.PROVIDER}/{self.PRIMARY_MODEL}",
-            messages=[{"role": "user", "content": "What is the current weather like in general terms?"}],
+            messages=[
+                {"role": "user", "content": "What is the current weather like in general terms?"}
+            ],
             max_tokens=200,
         )
 
@@ -396,7 +398,7 @@ class TestPerplexityIntegration(IntegrationTestBase):
                 {
                     "role": "user",
                     "content": 'Return a JSON object with "answer" (number) for: what is 5+5? '
-                              'Respond ONLY with valid JSON, no other text.',
+                    "Respond ONLY with valid JSON, no other text.",
                 }
             ],
             max_tokens=50,
@@ -466,8 +468,8 @@ class TestPerplexityMultipleModels:
     # Available models on Perplexity API (as of January 2026)
     # Note: sonar-reasoning excluded due to intermittent availability issues
     MODELS: ClassVar[list[str]] = [
-        "sonar",                # Fast, efficient (128K context)
-        "sonar-pro",            # Advanced search (200K context)
+        "sonar",  # Fast, efficient (128K context)
+        "sonar-pro",  # Advanced search (200K context)
         "sonar-reasoning-pro",  # Advanced reasoning (128K context)
     ]
 
@@ -475,6 +477,7 @@ class TestPerplexityMultipleModels:
     def setup_class(cls) -> None:
         """Check if credentials are available."""
         import os
+
         if not os.environ.get("PERPLEXITY_API_KEY"):
             pytest.skip("Missing PERPLEXITY_API_KEY environment variable")
 

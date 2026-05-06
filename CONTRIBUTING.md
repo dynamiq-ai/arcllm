@@ -73,8 +73,8 @@ Quick checklist:
 
 ### Key Invariants
 
-1. **Zero runtime dependencies**: Only stdlib imports are allowed
-2. **Response structure compatibility**: All responses must follow the LiteLLM format
+1. **Curated runtime deps**: only `httpx`, `aiohttp`, `msgspec`, `orjson`. New runtime deps require an issue + maintainer approval.
+2. **Response structure compatibility**: All responses must follow the LiteLLM / OpenAI format
 3. **Usage from providers**: Never count tokens ourselves; use provider-reported usage
 4. **Tool call format**: Must follow OpenAI format with `function.arguments` as JSON string
 
@@ -124,7 +124,7 @@ When reporting bugs, please include:
 Feature requests are welcome! Please:
 - Check existing issues first
 - Describe the use case clearly
-- Consider if it fits the project goals (lightweight, stdlib-only)
+- Consider if it fits the project goals (lightweight, minimal dependencies)
 
 ## Security
 

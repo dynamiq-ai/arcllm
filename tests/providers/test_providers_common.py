@@ -317,11 +317,12 @@ class TestBaseAdapterParamChecking:
     """Tests for BaseAdapter parameter checking."""
 
     def test_check_params_passes_supported(self):
-        """Test that supported params pass."""
+        """Test that supported params pass through."""
         config = ProviderConfig(api_key="test")
         adapter = _MockAdapter(config)
 
         result = adapter._check_params(
+            "gpt-4o-mini",  # known model that accepts temperature
             drop_params=False,
             temperature=0.7,
             max_tokens=100,
@@ -330,12 +331,13 @@ class TestBaseAdapterParamChecking:
         assert result["max_tokens"] == 100
 
     def test_check_params_raises_unsupported(self):
-        """Test that unsupported params raise error when drop_params=False."""
+        """Test that adapter-level unsupported params raise when drop_params=False."""
         config = ProviderConfig(api_key="test")
         adapter = _MockAdapter(config)
 
         with pytest.raises(UnsupportedParameterError) as exc_info:
             adapter._check_params(
+                "gpt-4o-mini",
                 drop_params=False,
                 temperature=0.7,
                 unsupported_param="value",
@@ -344,11 +346,12 @@ class TestBaseAdapterParamChecking:
         assert "unsupported_param" in str(exc_info.value)
 
     def test_check_params_drops_unsupported(self):
-        """Test that unsupported params are dropped when drop_params=True."""
+        """Test that adapter-level unsupported params are dropped when drop_params=True."""
         config = ProviderConfig(api_key="test")
         adapter = _MockAdapter(config)
 
         result = adapter._check_params(
+            "gpt-4o-mini",
             drop_params=True,
             temperature=0.7,
             unsupported_param="value",
@@ -356,6 +359,45 @@ class TestBaseAdapterParamChecking:
 
         assert "temperature" in result
         assert "unsupported_param" not in result
+
+    def test_capability_filter_drops_temperature_for_reasoning_models(self):
+        """Reasoning models reject ``temperature``; the model-level filter drops it
+        with a warning regardless of ``drop_params``."""
+        import warnings
+
+        config = ProviderConfig(api_key="test")
+        adapter = _MockAdapter(config)
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+            result = adapter._check_params(
+                "o4-mini",  # reasoning model in the capability table
+                drop_params=False,
+                temperature=0.5,
+                max_tokens=100,
+            )
+
+        assert "temperature" not in result
+        assert "max_tokens" in result
+        assert any(
+            "temperature" in str(w.message) and "o4-mini" in str(w.message) for w in captured
+        ), (
+            f"Expected a warning about temperature for o4-mini; got {[str(w.message) for w in captured]}"
+        )
+
+    def test_capability_filter_skips_unknown_models(self):
+        """Unknown models bypass the capability filter (we trust the user)."""
+        config = ProviderConfig(api_key="test")
+        adapter = _MockAdapter(config)
+
+        result = adapter._check_params(
+            "some-future-model-not-in-table",
+            drop_params=False,
+            temperature=0.5,
+            max_tokens=100,
+        )
+        assert result["temperature"] == 0.5
+        assert result["max_tokens"] == 100
 
     def test_get_api_key_from_config(self):
         """Test getting API key from config."""

@@ -16,7 +16,8 @@ See: https://webscrapingsite.com/resources/httpx-vs-requests-vs-aiohttp/
 
 from __future__ import annotations
 
-import asyncio
+import builtins
+import contextlib
 import os
 import ssl
 from dataclasses import dataclass
@@ -112,16 +113,13 @@ class AsyncHTTPClient:
         self._ssl_context = ssl.create_default_context()
         # Optimize SSL handshake performance (matching litellm)
         self._ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-        # Use optimized cipher ordering (fast ciphers first)
-        try:
+        # Use optimized cipher ordering (fast ciphers first); fall back to defaults if unsupported.
+        with contextlib.suppress(ssl.SSLError):
             self._ssl_context.set_ciphers(
                 "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
                 ":ECDH+AESGCM:DH+AESGCM:ECDH+AES:DH+AES:RSA+AESGCM:RSA+AES:!aNULL"
                 ":!eNULL:!MD5:!DSS"
             )
-        except ssl.SSLError:
-            # Fallback to default ciphers if custom ones aren't supported
-            pass
 
         # Cache default timeout object (avoid recreation per request)
         self._default_timeout = aiohttp.ClientTimeout(
@@ -228,9 +226,9 @@ class AsyncHTTPClient:
                     response_body = await response.read()
 
                     # Extract request ID
-                    request_id = response.headers.get(
-                        "x-request-id"
-                    ) or response.headers.get("request-id")
+                    request_id = response.headers.get("x-request-id") or response.headers.get(
+                        "request-id"
+                    )
 
                     return AsyncHTTPResponse(
                         status_code=response.status,
@@ -239,7 +237,7 @@ class AsyncHTTPClient:
                         request_id=request_id,
                     )
 
-            except asyncio.TimeoutError as e:
+            except builtins.TimeoutError as e:
                 last_error = TimeoutError(
                     f"Request timed out: {e}",
                     timeout_type="read",
@@ -310,9 +308,7 @@ class AsyncHTTPClient:
         timeout: float | None = None,
     ) -> AsyncHTTPResponse:
         """Make an async GET request."""
-        result = await self.request(
-            "GET", url, headers=headers, timeout=timeout, stream=False
-        )
+        result = await self.request("GET", url, headers=headers, timeout=timeout, stream=False)
         assert isinstance(result, AsyncHTTPResponse)
         return result
 

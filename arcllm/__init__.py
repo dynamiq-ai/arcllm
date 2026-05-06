@@ -1,7 +1,8 @@
 """
 ArcLLM - The arc connecting you to every LLM.
 
-Minimal dependencies. Maximum performance. One unified API.
+Minimal, curated runtime dependencies (`httpx`, `aiohttp`, `msgspec`, `orjson`).
+Maximum performance. One unified, OpenAI-compatible API.
 
 ArcLLM provides a high-performance interface for calling
 multiple LLM providers with a unified OpenAI-compatible API.
@@ -38,8 +39,8 @@ Basic Usage:
     )
 
 Performance Tips:
-    # For maximum async performance on Unix, install uvloop:
-    # pip install arcllm[performance]
+    # For maximum async performance on Unix, install uvloop separately:
+    # pip install uvloop
     #
     # Then at the start of your application:
     import uvloop
@@ -68,27 +69,34 @@ See README.md for complete documentation.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 __all__ = [
-    # Exceptions
     "ArcLLMError",
     "AuthenticationError",
+    "BudgetExceededError",
     "Choice",
     "ChunkChoice",
     "ChunkDelta",
+    "Citation",
     "ConnectionError",
     "ContentFilterError",
+    "CustomStreamWrapper",
     "EmbeddingData",
     "EmbeddingResponse",
     "EmbeddingUsage",
     "FunctionCall",
+    "ImageData",
+    "ImageResponse",
+    "InternalServerError",
     "InvalidRequestError",
     "Message",
-    # Types
     "ModelResponse",
     "ProviderAPIError",
     "RateLimitError",
+    "RerankResponse",
+    "RerankResult",
     "ResponseParseError",
+    "ServiceUnavailableError",
     "StreamChunk",
     "StreamingResponse",
     "TimeoutError",
@@ -96,27 +104,121 @@ __all__ = [
     "UnsupportedModelError",
     "UnsupportedParameterError",
     "Usage",
-    # Version
     "__version__",
     "acompletion",
     "aembedding",
-    # Core API
+    "aimage_edit",
+    "aimage_generation",
+    "aimage_variation",
+    "arerank",
     "completion",
     "completion_cost",
-    # Pricing
     "cost_per_token",
     "embedding",
-    # Capabilities
     "get_max_tokens",
+    "get_model_info",
     "get_model_pricing",
-    # Performance
+    "get_supported_openai_params",
+    "image_edit",
+    "image_generation",
+    "image_variation",
     "install_uvloop",
+    "rerank",
     "stream_chunk_builder",
+    "supports_function_calling",
     "supports_pdf_input",
     "supports_structured_output",
     "supports_tools",
     "supports_vision",
+    "token_counter",
 ]
+
+
+# Capabilities
+from arcllm.capabilities import (
+    get_max_tokens,
+    get_model_info,
+    get_supported_openai_params,
+    supports_function_calling,
+    supports_pdf_input,
+    supports_structured_output,
+    supports_tools,
+    supports_vision,
+)
+
+# Core API functions
+from arcllm.core import (
+    acompletion,
+    aembedding,
+    completion,
+    embedding,
+    stream_chunk_builder,
+)
+
+# Exceptions
+from arcllm.exceptions import (
+    ArcLLMError,
+    AuthenticationError,
+    BudgetExceededError,
+    ConnectionError,
+    ContentFilterError,
+    InternalServerError,
+    InvalidRequestError,
+    ProviderAPIError,
+    RateLimitError,
+    ResponseParseError,
+    ServiceUnavailableError,
+    TimeoutError,
+    UnsupportedModelError,
+    UnsupportedParameterError,
+)
+
+# Image generation surface
+from arcllm.images import (
+    aimage_edit,
+    aimage_generation,
+    aimage_variation,
+    image_edit,
+    image_generation,
+    image_variation,
+)
+
+# Pricing
+from arcllm.pricing import (
+    completion_cost,
+    cost_per_token,
+    get_model_pricing,
+)
+
+# Rerank surface (Cohere in 0.4; Voyage / Bedrock / Jina to follow)
+from arcllm.rerank import arerank, rerank
+
+# Token counting (heuristic by default; tiktoken-precise with `arcllm[tokenize]`)
+from arcllm.tokens import token_counter
+
+# Providers are lazy-loaded when first accessed.
+# Types
+from arcllm.types import (
+    Choice,
+    ChunkChoice,
+    ChunkDelta,
+    Citation,
+    CustomStreamWrapper,
+    EmbeddingData,
+    EmbeddingResponse,
+    EmbeddingUsage,
+    FunctionCall,
+    ImageData,
+    ImageResponse,
+    Message,
+    ModelResponse,
+    RerankResponse,
+    RerankResult,
+    StreamChunk,
+    StreamingResponse,
+    ToolCall,
+    Usage,
+)
 
 
 def install_uvloop() -> bool:
@@ -140,66 +242,8 @@ def install_uvloop() -> bool:
         import uvloop
 
         uvloop.install()
-        return True
     except ImportError:
         return False
     except Exception:
-        # uvloop might fail on some platforms
         return False
-
-# Core API functions
-# Capabilities
-from arcllm.capabilities import (
-    get_max_tokens,
-    supports_pdf_input,
-    supports_structured_output,
-    supports_tools,
-    supports_vision,
-)
-from arcllm.core import (
-    acompletion,
-    aembedding,
-    completion,
-    embedding,
-    stream_chunk_builder,
-)
-
-# Exceptions
-from arcllm.exceptions import (
-    ArcLLMError,
-    AuthenticationError,
-    ConnectionError,
-    ContentFilterError,
-    InvalidRequestError,
-    ProviderAPIError,
-    RateLimitError,
-    ResponseParseError,
-    TimeoutError,
-    UnsupportedModelError,
-    UnsupportedParameterError,
-)
-
-# Pricing
-from arcllm.pricing import (
-    completion_cost,
-    cost_per_token,
-    get_model_pricing,
-)
-
-# Providers are now lazy-loaded when first accessed
-# Types
-from arcllm.types import (
-    Choice,
-    ChunkChoice,
-    ChunkDelta,
-    EmbeddingData,
-    EmbeddingResponse,
-    EmbeddingUsage,
-    FunctionCall,
-    Message,
-    ModelResponse,
-    StreamChunk,
-    StreamingResponse,
-    ToolCall,
-    Usage,
-)
+    return True

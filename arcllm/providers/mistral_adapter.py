@@ -11,6 +11,7 @@ from typing import Any
 import orjson
 
 from arcllm.providers.base import (
+    COMMON_PARAMS,
     ProviderConfig,
     RequestData,
     register_provider,
@@ -28,6 +29,12 @@ class MistralAdapter(OpenAIAdapter):
     """
 
     provider_name = "mistral"
+
+    # Mistral-specific extras on top of the OpenAI-compatible surface.
+    supported_params = COMMON_PARAMS | {
+        "safe_prompt",  # Mistral-only content moderation flag.
+        "random_seed",  # Mistral's name for deterministic sampling.
+    }
 
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
@@ -55,7 +62,7 @@ class MistralAdapter(OpenAIAdapter):
     ) -> RequestData:
         """Build Mistral chat completion request."""
         # Use parent's implementation with Mistral-specific adjustments
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         body: dict[str, Any] = {
             "model": model,
@@ -78,6 +85,11 @@ class MistralAdapter(OpenAIAdapter):
         for param in optional_params:
             if param in kwargs and kwargs[param] is not None:
                 body[param] = kwargs[param]
+
+        # Mistral accepts `stop` as a list of strings; map a bare string too.
+        if kwargs.get("stop"):
+            stop_val = kwargs["stop"]
+            body["stop"] = stop_val if isinstance(stop_val, list) else [stop_val]
 
         # Map seed to random_seed
         if "seed" in kwargs and kwargs["seed"] is not None:

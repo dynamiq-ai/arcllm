@@ -8,6 +8,7 @@ from arcllm.types import (
     Choice,
     ChunkChoice,
     ChunkDelta,
+    Citation,
     EmbeddingData,
     EmbeddingResponse,
     EmbeddingUsage,
@@ -18,6 +19,83 @@ from arcllm.types import (
     ToolCall,
     Usage,
 )
+
+
+class TestCitation:
+    """Tests for Citation dataclass."""
+
+    def test_url_only(self):
+        """Perplexity-legacy shape: URL with no title/snippet."""
+        c = Citation(url="https://example.com/x")
+        assert c.url == "https://example.com/x"
+        assert c.title is None
+        assert c.snippet is None
+        assert c.start_index is None
+        assert c.end_index is None
+        assert c.model_dump() == {"url": "https://example.com/x"}
+
+    def test_full_citation(self):
+        """Anthropic web-search shape: URL + title + snippet + indices."""
+        c = Citation(
+            url="https://example.com/x",
+            title="Example",
+            snippet="An example sentence",
+            start_index=12,
+            end_index=42,
+        )
+        assert c.model_dump() == {
+            "url": "https://example.com/x",
+            "title": "Example",
+            "snippet": "An example sentence",
+            "start_index": 12,
+            "end_index": 42,
+        }
+
+
+class TestUsageCacheTokens:
+    """Cache token tracking on Usage struct."""
+
+    def test_usage_without_cache_omits_fields(self):
+        u = Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        dumped = u.model_dump()
+        assert "cache_read_input_tokens" not in dumped
+        assert "cache_creation_input_tokens" not in dumped
+
+    def test_usage_with_cache_serialises_fields(self):
+        u = Usage(
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            cache_read_input_tokens=80,
+            cache_creation_input_tokens=10,
+        )
+        dumped = u.model_dump()
+        assert dumped["cache_read_input_tokens"] == 80
+        assert dumped["cache_creation_input_tokens"] == 10
+
+
+class TestMessageWithCitations:
+    """Citations field threading on Message."""
+
+    def test_message_without_citations_is_None(self):
+        """Default messages don't carry citations — only grounded responses do."""
+        m = Message(role="assistant", content="hi")
+        assert m.citations is None
+        assert "citations" not in m.model_dump()
+
+    def test_message_with_citations_serialises(self):
+        m = Message(
+            role="assistant",
+            content="The sky is blue.",
+            citations=[
+                Citation(url="https://example.com/sky", title="Sky color"),
+                Citation(url="https://example.com/blue"),
+            ],
+        )
+        dumped = m.model_dump()
+        assert "citations" in dumped
+        assert len(dumped["citations"]) == 2
+        assert dumped["citations"][0]["title"] == "Sky color"
 
 
 class TestFunctionCall:

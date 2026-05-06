@@ -15,7 +15,7 @@ import hashlib
 import hmac
 import os
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, urlparse
 
 import orjson
@@ -23,10 +23,13 @@ import orjson
 from arcllm.exceptions import (
     ArcLLMError,
     AuthenticationError,
+    BudgetExceededError,
+    InternalServerError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
     ResponseParseError,
+    ServiceUnavailableError,
     UnsupportedModelError,
 )
 from arcllm.providers.base import (
@@ -54,6 +57,20 @@ from arcllm.types import (
 __all__ = ["BedrockAdapter"]
 
 
+_ANTHROPIC_NATIVE_TOOL_PREFIXES = (
+    "web_search_",
+    "code_execution_",
+    "text_editor_",
+    "computer_use_",
+    "bash_",
+)
+
+
+def _is_anthropic_native_tool(tool_type: str) -> bool:
+    """True if ``tool_type`` matches one of Anthropic's server-side tools."""
+    return any(tool_type.startswith(prefix) for prefix in _ANTHROPIC_NATIVE_TOOL_PREFIXES)
+
+
 class BedrockAdapter(BaseAdapter):
     """
     Adapter for AWS Bedrock Runtime API.
@@ -76,6 +93,10 @@ class BedrockAdapter(BaseAdapter):
         self._secret_key = config.aws_secret_access_key or os.environ.get("AWS_SECRET_ACCESS_KEY")
         self._session_token = config.aws_session_token or os.environ.get("AWS_SESSION_TOKEN")
         self._api_base = config.api_base or f"https://bedrock-runtime.{self._region}.amazonaws.com"
+        # Lazy-initialised proxy adapters used only for response parsing on
+        # cross-provider Bedrock paths (e.g. OpenAI-on-Bedrock). See
+        # ``_parse_openai_response``.
+        self._proxy_cache: dict[str, Any] = {}
 
     def _get_credentials(self) -> tuple[str, str, str | None]:
         """Get AWS credentials."""
@@ -188,13 +209,21 @@ class BedrockAdapter(BaseAdapter):
         return final_headers
 
     def _get_model_family(self, model: str) -> str:
-        """Determine model family from model ID."""
+        """Determine model family from a Bedrock model id.
+
+        Bedrock model ids follow ``<provider>.<model>-<version>`` (or
+        ``<region>.<provider>.<model>...`` for cross-region inference profiles).
+        We classify by provider segment.
+        """
         model_lower = model.lower()
+        # OpenAI GPT-OSS family — Bedrock now hosts ``openai.gpt-oss-*``.
+        if "openai" in model_lower or model_lower.startswith("gpt-oss"):
+            return "openai"
         if "anthropic" in model_lower or "claude" in model_lower:
             return "anthropic"
         if "meta" in model_lower or "llama" in model_lower:
             return "meta"
-        if "amazon" in model_lower or "titan" in model_lower:
+        if "amazon" in model_lower or "titan" in model_lower or "nova" in model_lower:
             return "amazon"
         if "cohere" in model_lower:
             return "cohere"
@@ -202,7 +231,7 @@ class BedrockAdapter(BaseAdapter):
             return "mistral"
         if "ai21" in model_lower:
             return "ai21"
-        return "anthropic"  # Default
+        return "anthropic"  # Default fallback
 
     def _build_anthropic_body(
         self,
@@ -262,11 +291,22 @@ class BedrockAdapter(BaseAdapter):
                 kwargs["stop"] if isinstance(kwargs["stop"], list) else [kwargs["stop"]]
             )
 
+        # Extended thinking on Bedrock-hosted Claude takes the same shape as
+        # direct Anthropic. Drop temperature/top_p when thinking is on.
+        if "thinking_budget" in kwargs and kwargs["thinking_budget"] is not None:
+            body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": int(kwargs["thinking_budget"]),
+            }
+            body.pop("temperature", None)
+            body.pop("top_p", None)
+
         # Handle tools
         if kwargs.get("tools"):
             tools: list[dict[str, Any]] = []
             for tool in kwargs["tools"]:
-                if tool.get("type") == "function":
+                tool_type = tool.get("type", "")
+                if tool_type == "function":
                     func: dict[str, Any] = tool.get("function", {})
                     tools.append(
                         {
@@ -277,8 +317,85 @@ class BedrockAdapter(BaseAdapter):
                             ),
                         }
                     )
+                elif _is_anthropic_native_tool(tool_type):
+                    tools.append(tool)
             body["tools"] = tools
 
+            # Translate tool_choice to Anthropic shape (auto/any/tool/none).
+            tc: Any = kwargs.get("tool_choice")
+            if tc == "auto":
+                body["tool_choice"] = {"type": "auto"}
+            elif tc == "required":
+                body["tool_choice"] = {"type": "any"}
+            elif isinstance(tc, dict):
+                tc_dict = cast("dict[str, Any]", tc)
+                fn_raw: Any = tc_dict.get("function") or {}
+                if isinstance(fn_raw, dict):
+                    fn = cast("dict[str, Any]", fn_raw)
+                    name = fn.get("name")
+                    if name:
+                        body["tool_choice"] = {"type": "tool", "name": name}
+
+        # Anthropic-on-Bedrock honours ``response_format=json_schema`` via the
+        # tool-result pattern: emit a function-style tool that captures the
+        # schema and force the model to call it. This mirrors how the direct
+        # Anthropic API encourages JSON-mode usage.
+        rf_raw: Any = kwargs.get("response_format")
+        if isinstance(rf_raw, dict) and cast("dict[str, Any]", rf_raw).get("type") == "json_schema":
+            rf = cast("dict[str, Any]", rf_raw)
+            json_schema = cast("dict[str, Any]", rf.get("json_schema") or {})
+            schema: Any = json_schema.get("schema") or {}
+            schema_name = str(json_schema.get("name") or "structured_output")
+            tools = cast("list[dict[str, Any]]", body.get("tools") or [])
+            tools.append(
+                {
+                    "name": schema_name,
+                    "description": "Return the response as JSON matching the supplied schema.",
+                    "input_schema": schema,
+                }
+            )
+            body["tools"] = tools
+            body["tool_choice"] = {"type": "tool", "name": schema_name}
+
+        return body
+
+    def _build_openai_body(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Build an OpenAI Chat Completions body for ``openai.gpt-oss-*`` on Bedrock.
+
+        Bedrock's GPT-OSS endpoint speaks the OpenAI wire format almost verbatim,
+        so we only thread the params we know are accepted.
+        """
+        body: dict[str, Any] = {
+            "messages": messages,
+            "stream": stream,
+        }
+        for key in (
+            "max_tokens",
+            "max_completion_tokens",
+            "temperature",
+            "top_p",
+            "stop",
+            "seed",
+            "presence_penalty",
+            "frequency_penalty",
+            "n",
+            "user",
+            "reasoning_effort",
+        ):
+            if key in kwargs and kwargs[key] is not None:
+                body[key] = kwargs[key]
+        if kwargs.get("tools"):
+            body["tools"] = kwargs["tools"]
+            if kwargs.get("tool_choice") is not None:
+                body["tool_choice"] = kwargs["tool_choice"]
+        if kwargs.get("response_format"):
+            body["response_format"] = kwargs["response_format"]
         return body
 
     def build_request(
@@ -291,13 +408,15 @@ class BedrockAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> RequestData:
         """Build Bedrock invoke request."""
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         model_family = self._get_model_family(model)
 
         # Build body based on model family
         if model_family == "anthropic":
             body = self._build_anthropic_body(messages, **kwargs)
+        elif model_family == "openai":
+            body = self._build_openai_body(messages, stream=stream, **kwargs)
         else:
             # Generic body for other models (simplified)
             body = {
@@ -338,8 +457,29 @@ class BedrockAdapter(BaseAdapter):
 
         if model_family == "anthropic":
             return self._parse_anthropic_response(resp, model)
+        if model_family == "openai":
+            # OpenAI on Bedrock returns the standard Chat Completions shape.
+            # Delegate to ``OpenAIAdapter.parse_response`` via a minimal stub
+            # so we don't duplicate the logic. We can't subclass because we
+            # already inherit from ``BaseAdapter``; reuse the helper instead.
+            return self._parse_openai_response(resp, model)
         # Generic parsing
         return self._parse_generic_response(resp, model)
+
+    def _parse_openai_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
+        """Parse an OpenAI-shape Bedrock response.
+
+        Reuses ``OpenAIAdapter`` parsing via a lightweight proxy adapter
+        cached on the instance (lazy to avoid circular import at module load).
+        """
+        from arcllm.providers.openai_adapter import OpenAIAdapter
+
+        proxy = self._proxy_cache.get("openai")
+        if proxy is None:
+            proxy = OpenAIAdapter(ProviderConfig(api_key="bedrock-noop"))
+            self._proxy_cache["openai"] = proxy
+        response: ModelResponse = proxy.parse_response(orjson.dumps(resp), model)
+        return response
 
     def _parse_anthropic_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
         """Parse Anthropic Claude response from Bedrock."""
@@ -370,7 +510,7 @@ class BedrockAdapter(BaseAdapter):
         message = Message(
             role="assistant",
             content=text_content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls or None,
         )
 
         # Map stop reason
@@ -382,11 +522,20 @@ class BedrockAdapter(BaseAdapter):
             "tool_use": "tool_calls",
         }.get(stop_reason, stop_reason)
 
+        # Anthropic-on-Bedrock returns the same usage shape as direct
+        # Anthropic; capture the cache token fields when present.
         usage_data = resp.get("usage", {})
+        cache_read = usage_data.get("cache_read_input_tokens")
+        cache_creation = usage_data.get("cache_creation_input_tokens")
+        base_input = usage_data.get("input_tokens", 0)
+        prompt_total = base_input + (cache_read or 0) + (cache_creation or 0)
+        completion_tokens = usage_data.get("output_tokens", 0)
         usage = Usage(
-            prompt_tokens=usage_data.get("input_tokens", 0),
-            completion_tokens=usage_data.get("output_tokens", 0),
-            total_tokens=usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0),
+            prompt_tokens=prompt_total,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_total + completion_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_creation,
         )
 
         return ModelResponse(
@@ -400,24 +549,180 @@ class BedrockAdapter(BaseAdapter):
         )
 
     def _parse_generic_response(self, resp: dict[str, Any], model: str) -> ModelResponse:
-        """Parse generic model response."""
-        # Cache timestamp once for this response
-        now = int(time.time())
-        content = (
-            resp.get("generation", "") or resp.get("outputText", "") or resp.get("completion", "")
-        )
+        """Parse a non-Anthropic Bedrock response.
 
-        message = Message(role="assistant", content=content)
+        Each Bedrock model family ships its own response shape; we dispatch on
+        ``_get_model_family`` rather than blindly probing field names so that
+        usage tokens are captured wherever the provider supplies them.
+        """
+        now = int(time.time())
+        family = self._get_model_family(model)
+        content, finish_reason, usage = self._extract_generic_body(family, resp)
 
         return ModelResponse(
             id=f"bedrock-{now}",
             object="chat.completion",
             created=now,
             model=model,
-            choices=[Choice(index=0, message=message, finish_reason="stop")],
-            usage=Usage(),
-            model_extra={"usage": {}},
+            choices=[
+                Choice(
+                    index=0,
+                    message=Message(role="assistant", content=content),
+                    finish_reason=finish_reason,
+                )
+            ],
+            usage=usage,
+            model_extra={"usage": usage.model_dump() if usage else {}},
         )
+
+    @staticmethod
+    def _extract_generic_body(
+        family: str,
+        resp: dict[str, Any],
+    ) -> tuple[str, str | None, Usage | None]:
+        """Return ``(content, finish_reason, usage)`` for non-Anthropic families.
+
+        Field names per family:
+
+        - ``meta`` (Llama):   ``generation`` / ``stop_reason`` /
+          ``prompt_token_count`` + ``generation_token_count``.
+        - ``amazon`` (Titan): ``results[0].outputText`` /
+          ``completionReason`` / ``inputTextTokenCount`` +
+          ``results[0].tokenCount``. Nova returns
+          ``output.message.content[0].text`` and a top-level ``usage`` dict.
+        - ``mistral``:        ``outputs[0].text`` / ``outputs[0].stop_reason``
+          (no usage block).
+        - ``cohere``:         ``generations[0].text`` /
+          ``generations[0].finish_reason`` (no usage block).
+        - ``ai21``:           ``completions[0].data.text`` /
+          ``completions[0].finishReason.reason``.
+        """
+
+        def _str(value: Any) -> str:
+            return str(value) if value else ""
+
+        def _opt_str(value: Any) -> str | None:
+            return str(value) if value else None
+
+        def _int(value: Any) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        if family == "meta":
+            content = _str(resp.get("generation"))
+            finish = _opt_str(resp.get("stop_reason"))
+            prompt_tokens = resp.get("prompt_token_count")
+            completion_tokens = resp.get("generation_token_count")
+            usage: Usage | None = None
+            if prompt_tokens is not None or completion_tokens is not None:
+                p = _int(prompt_tokens)
+                c = _int(completion_tokens)
+                usage = Usage(prompt_tokens=p, completion_tokens=c, total_tokens=p + c)
+            return content, finish, usage
+
+        # All non-Anthropic Bedrock response shapes are loosely-typed JSON. We
+        # cast the wire dict to ``dict[str, Any]`` at every boundary so pyright
+        # can narrow each nested ``.get()`` cleanly under strict mode.
+        if family == "amazon":
+            # Nova chat models: output.message.content[0].text + top-level usage.
+            output_raw = resp.get("output")
+            if isinstance(output_raw, dict) and "message" in output_raw:
+                output = cast("dict[str, Any]", output_raw)
+                msg = cast("dict[str, Any]", output.get("message") or {})
+                parts = cast("list[Any]", msg.get("content") or [])
+                content = "".join(
+                    str(cast("dict[str, Any]", p).get("text") or "")
+                    for p in parts
+                    if isinstance(p, dict)
+                )
+                finish = _opt_str(resp.get("stopReason"))
+                u = cast("dict[str, Any]", resp.get("usage") or {})
+                if u:
+                    in_tok = _int(u.get("inputTokens"))
+                    out_tok = _int(u.get("outputTokens"))
+                    total = _int(u.get("totalTokens")) or (in_tok + out_tok)
+                    usage = Usage(
+                        prompt_tokens=in_tok,
+                        completion_tokens=out_tok,
+                        total_tokens=total,
+                    )
+                else:
+                    usage = None
+                return content, finish, usage
+            # Titan text models: results array.
+            results = cast("list[Any]", resp.get("results") or [])
+            content = "".join(
+                str(cast("dict[str, Any]", r).get("outputText") or "")
+                for r in results
+                if isinstance(r, dict)
+            )
+            finish = (
+                _opt_str(cast("dict[str, Any]", results[0]).get("completionReason"))
+                if results and isinstance(results[0], dict)
+                else None
+            )
+            input_tokens = resp.get("inputTextTokenCount")
+            output_tokens = sum(
+                _int(cast("dict[str, Any]", r).get("tokenCount"))
+                for r in results
+                if isinstance(r, dict)
+            )
+            if input_tokens is not None or output_tokens:
+                in_tok = _int(input_tokens)
+                usage = Usage(
+                    prompt_tokens=in_tok,
+                    completion_tokens=output_tokens,
+                    total_tokens=in_tok + output_tokens,
+                )
+            else:
+                usage = None
+            return content, finish, usage
+
+        if family == "mistral":
+            outputs = cast("list[Any]", resp.get("outputs") or [])
+            content = "".join(
+                str(cast("dict[str, Any]", o).get("text") or "")
+                for o in outputs
+                if isinstance(o, dict)
+            )
+            finish = (
+                _opt_str(cast("dict[str, Any]", outputs[0]).get("stop_reason"))
+                if outputs and isinstance(outputs[0], dict)
+                else None
+            )
+            return content, finish, None
+
+        if family == "cohere":
+            gens = cast("list[Any]", resp.get("generations") or [])
+            content = "".join(
+                str(cast("dict[str, Any]", g).get("text") or "")
+                for g in gens
+                if isinstance(g, dict)
+            )
+            finish = (
+                _opt_str(cast("dict[str, Any]", gens[0]).get("finish_reason"))
+                if gens and isinstance(gens[0], dict)
+                else None
+            )
+            return content, finish, None
+
+        if family == "ai21":
+            completions = cast("list[Any]", resp.get("completions") or [])
+            content = ""
+            finish = None
+            if completions and isinstance(completions[0], dict):
+                first = cast("dict[str, Any]", completions[0])
+                data = cast("dict[str, Any]", first.get("data") or {})
+                content = str(data.get("text") or "")
+                finish_reason = cast("dict[str, Any]", first.get("finishReason") or {})
+                finish = _opt_str(finish_reason.get("reason"))
+            return content, finish, None
+
+        # Unknown family: best-effort extraction from any of the historical fields.
+        content = _str(resp.get("generation") or resp.get("outputText") or resp.get("completion"))
+        return content, None, None
 
     def parse_stream_event(self, data: str, model: str) -> StreamChunk | None:
         """Parse Bedrock streaming event."""
@@ -559,40 +864,33 @@ class BedrockAdapter(BaseAdapter):
         except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
 
+        common_kwargs: dict[str, Any] = {
+            "provider": self.provider_name,
+            "status_code": status_code,
+            "request_id": request_id,
+        }
+        message_lower = (message or "").lower()
+
         if status_code in {401, 403}:
-            return AuthenticationError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return AuthenticationError(message, **common_kwargs)
+        if status_code == 402:
+            return BudgetExceededError(message, **common_kwargs)
         if status_code == 429:
-            return RateLimitError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            if any(
+                token in message_lower
+                for token in ("quota", "throttling", "throttled", "credit", "billing")
+            ):
+                return BudgetExceededError(message, **common_kwargs)
+            return RateLimitError(message, **common_kwargs)
         if status_code == 400:
-            return InvalidRequestError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return InvalidRequestError(message, **common_kwargs)
         if status_code == 404:
-            return UnsupportedModelError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
-        return ProviderAPIError(
-            message,
-            provider=self.provider_name,
-            status_code=status_code,
-            request_id=request_id,
-        )
+            return UnsupportedModelError(message, **common_kwargs)
+        if status_code == 503:
+            return ServiceUnavailableError(message, **common_kwargs)
+        if status_code >= 500:
+            return InternalServerError(message, **common_kwargs)
+        return ProviderAPIError(message, **common_kwargs)
 
     def build_embedding_request(
         self,

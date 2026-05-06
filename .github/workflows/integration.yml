@@ -1,475 +1,141 @@
-name: Integration Tests
+name: Integration Tests (live)
 
+# Only run on demand or on a nightly schedule. PR + main-branch pushes run the
+# fast unit suite from `ci.yml` — they do NOT call provider APIs (cost + flake).
 on:
-  # Manual trigger with provider selection
   workflow_dispatch:
     inputs:
       providers:
-        description: 'Comma-separated list of providers to test (or "all")'
+        description: 'Comma-separated provider keys (e.g. "openai,anthropic"); blank = all'
         required: false
-        default: 'all'
-      run_expensive:
-        description: 'Run expensive/slow tests'
-        required: false
-        default: 'false'
-        type: boolean
-
-  # Scheduled nightly runs
+        default: ''
   schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC daily
-
-  # Run on main branch pushes (if secrets available)
-  push:
-    branches: [main]
+    - cron: '0 2 * * *'  # 02:00 UTC nightly
 
 env:
   PYTHON_VERSION: "3.12"
-  # Control integration test execution
-  RUN_INTEGRATION_TESTS: ${{ secrets.RUN_INTEGRATION_TESTS || 'false' }}
 
 jobs:
-  # Check if we should run integration tests
-  check-secrets:
-    name: Check Secrets Available
+  matrix:
+    name: ${{ matrix.provider }}
     runs-on: ubuntu-latest
-    outputs:
-      has_secrets: ${{ steps.check.outputs.has_secrets }}
+    timeout-minutes: 15
+    # Don't fail the whole run if one provider is having an outage.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { provider: openai,       env: OPENAI_API_KEY,     file: tests/integration/test_openai_integration.py }
+          - { provider: anthropic,    env: ANTHROPIC_API_KEY,  file: tests/integration/test_anthropic_integration.py }
+          - { provider: gemini,       env: GEMINI_API_KEY,     file: tests/integration/test_gemini_integration.py }
+          - { provider: mistral,      env: MISTRAL_API_KEY,    file: tests/integration/test_mistral_integration.py }
+          - { provider: cohere,       env: COHERE_API_KEY,     file: tests/integration/test_cohere_integration.py }
+          - { provider: groq,         env: GROQ_API_KEY,       file: tests/integration/test_groq_integration.py }
+          - { provider: together,     env: TOGETHER_API_KEY,   file: tests/integration/test_together_integration.py }
+          - { provider: fireworks,    env: FIREWORKS_API_KEY,  file: tests/integration/test_fireworks_integration.py }
+          - { provider: deepseek,     env: DEEPSEEK_API_KEY,   file: tests/integration/test_deepseek_integration.py }
+          - { provider: perplexity,   env: PERPLEXITY_API_KEY, file: tests/integration/test_perplexity_integration.py }
     steps:
-      - id: check
+      - name: Skip when secret missing
+        id: gate
         run: |
-          if [[ -n "${{ secrets.OPENAI_API_KEY }}" ]]; then
-            echo "has_secrets=true" >> $GITHUB_OUTPUT
+          # Per-provider key check. Skip the rest of the job if the secret isn't configured —
+          # this lets contributors run the workflow without paying for every provider.
+          if [[ -z "${{ secrets[matrix.env] }}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No ${{ matrix.env }} secret configured; skipping ${{ matrix.provider }}."
           else
-            echo "has_secrets=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  integration-openai:
-    name: Integration - OpenAI
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
+      - name: Skip when filter excludes provider
+        if: steps.gate.outputs.skip == 'false' && inputs.providers != ''
+        id: filter
+        run: |
+          if [[ ",${{ inputs.providers }}," != *",${{ matrix.provider }},"* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.provider }} excluded by 'providers' input."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true' && steps.filter.outputs.skip != 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true' && steps.filter.outputs.skip != 'true'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install
+        if: steps.gate.outputs.skip != 'true' && steps.filter.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run OpenAI integration tests
+      - name: Run live integration tests
+        if: steps.gate.outputs.skip != 'true' && steps.filter.outputs.skip != 'true'
+        env:
+          # Forward only this provider's secret. Set GOOGLE_API_KEY too for Gemini's docs alias.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
         run: |
-          pytest tests/integration/test_openai_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-openai.xml
-        continue-on-error: true
+          pytest "${{ matrix.file }}" \
+            -v --tb=short --timeout=60 \
+            --junitxml=junit-${{ matrix.provider }}.xml
 
-      - name: Upload test results
+      - name: Upload junit report
+        if: always() && steps.gate.outputs.skip != 'true' && steps.filter.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: integration-results-openai
-          path: junit-integration-openai.xml
+          name: integration-${{ matrix.provider }}
+          path: junit-${{ matrix.provider }}.xml
+          if-no-files-found: ignore
 
-  integration-anthropic:
-    name: Integration - Anthropic
+  parallel-smoke:
+    name: All providers in parallel
     runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    timeout-minutes: 10
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
+          cache: 'pip'
+      - run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-
-      - name: Run Anthropic integration tests
+      - name: Run cross-provider parallel smoke
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
         run: |
-          pytest tests/integration/test_anthropic_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-anthropic.xml
-        continue-on-error: true
-
-      - name: Upload test results
+          pytest tests/integration/test_provider_matrix.py \
+            -v --tb=short --timeout=120 \
+            --junitxml=junit-parallel.xml
+      - if: always()
         uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: integration-results-anthropic
-          path: junit-integration-anthropic.xml
-
-  integration-gemini:
-    name: Integration - Gemini
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GOOGLE_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Gemini integration tests
-        run: |
-          pytest tests/integration/test_gemini_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-gemini.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-gemini
-          path: junit-integration-gemini.xml
-
-  integration-mistral:
-    name: Integration - Mistral
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Mistral integration tests
-        run: |
-          pytest tests/integration/test_mistral_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-mistral.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-mistral
-          path: junit-integration-mistral.xml
-
-  integration-cohere:
-    name: Integration - Cohere
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Cohere integration tests
-        run: |
-          pytest tests/integration/test_cohere_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-cohere.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-cohere
-          path: junit-integration-cohere.xml
-
-  integration-groq:
-    name: Integration - Groq
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Groq integration tests
-        run: |
-          pytest tests/integration/test_groq_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-groq.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-groq
-          path: junit-integration-groq.xml
-
-  integration-together:
-    name: Integration - Together AI
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Together AI integration tests
-        run: |
-          pytest tests/integration/test_together_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-together.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-together
-          path: junit-integration-together.xml
-
-  integration-fireworks:
-    name: Integration - Fireworks AI
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Fireworks AI integration tests
-        run: |
-          pytest tests/integration/test_fireworks_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-fireworks.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-fireworks
-          path: junit-integration-fireworks.xml
-
-  integration-deepseek:
-    name: Integration - DeepSeek
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run DeepSeek integration tests
-        run: |
-          pytest tests/integration/test_deepseek_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-deepseek.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-deepseek
-          path: junit-integration-deepseek.xml
-
-  integration-perplexity:
-    name: Integration - Perplexity
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    if: |
-      needs.check-secrets.outputs.has_secrets == 'true' &&
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'push')
-    timeout-minutes: 15
-    env:
-      PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Perplexity integration tests
-        run: |
-          pytest tests/integration/test_perplexity_integration.py \
-            -v \
-            --tb=short \
-            --timeout=60 \
-            --junitxml=junit-integration-perplexity.xml
-        continue-on-error: true
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-results-perplexity
-          path: junit-integration-perplexity.xml
-
-  # Summary job that collects all results
-  integration-summary:
-    name: Integration Test Summary
-    runs-on: ubuntu-latest
-    needs:
-      - integration-openai
-      - integration-anthropic
-      - integration-gemini
-      - integration-mistral
-      - integration-cohere
-      - integration-groq
-      - integration-together
-      - integration-fireworks
-      - integration-deepseek
-      - integration-perplexity
-    if: always()
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: integration-results-*
-          merge-multiple: true
-
-      - name: Summary
-        run: |
-          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Provider | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| OpenAI | ${{ needs.integration-openai.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Anthropic | ${{ needs.integration-anthropic.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Gemini | ${{ needs.integration-gemini.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Mistral | ${{ needs.integration-mistral.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cohere | ${{ needs.integration-cohere.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Groq | ${{ needs.integration-groq.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Together AI | ${{ needs.integration-together.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Fireworks AI | ${{ needs.integration-fireworks.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| DeepSeek | ${{ needs.integration-deepseek.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Perplexity | ${{ needs.integration-perplexity.result }} |" >> $GITHUB_STEP_SUMMARY
+          name: parallel-smoke
+          path: junit-parallel.xml
+          if-no-files-found: ignore

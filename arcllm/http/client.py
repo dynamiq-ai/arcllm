@@ -13,6 +13,7 @@ Features:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import ssl
 from dataclasses import dataclass
@@ -53,15 +54,13 @@ def _get_ssl_context() -> ssl.SSLContext:
         _ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
         # Use optimized cipher ordering (fast ciphers first)
         # These are well-supported and performant
-        try:
+        # Fallback to default ciphers if custom ones aren't supported on this platform.
+        with contextlib.suppress(ssl.SSLError):
             _ssl_context.set_ciphers(
                 "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20"
                 ":ECDH+AESGCM:DH+AESGCM:ECDH+AES:DH+AES:RSA+AESGCM:RSA+AES:!aNULL"
                 ":!eNULL:!MD5:!DSS"
             )
-        except ssl.SSLError:
-            # Fallback to default ciphers if custom ones aren't supported
-            pass
     return _ssl_context
 
 

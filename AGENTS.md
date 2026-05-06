@@ -1,235 +1,281 @@
-# AGENTS.md - Guide for AI Coding Agents
+# AGENTS.md — engineering guide for arcllm
 
-This document provides guidelines for AI coding agents working on the arcllm codebase.
+This is the canonical engineering reference for the **arcllm** repository.
+It's read by every AI tool the team uses (Claude Code, Cursor, Aider, OpenAI
+Codex SDK) and by humans onboarding to the codebase. Keep it accurate; if
+you change behaviour, update this file in the same PR.
 
-## Project Overview
+## Project
 
-arcllm is a lightweight, high-performance Python library for calling LLM providers. It's designed to be:
-- API-compatible with LiteLLM SDK
-- Zero runtime dependencies (stdlib only)
-- Fast and efficient
-- Easy to maintain by autonomous agents
+`arcllm` is a Python SDK that fans one OpenAI-shape API across **15 LLM
+providers**: OpenAI, Anthropic, Gemini, Mistral, Cohere, Groq, Together AI,
+Fireworks AI, DeepSeek, Perplexity, Ollama, plus the four **platforms** that
+host third-party models — Azure (OpenAI Service + AI Foundry), AWS Bedrock,
+Google Vertex AI, and Databricks Foundation Model APIs.
 
-## Code Style & Conventions
+Public surface: `completion`, `acompletion`, `embedding`, `aembedding`,
+`stream_chunk_builder`, `completion_cost`, `cost_per_token`,
+`get_model_pricing`, `get_max_tokens`, `supports_vision`, `supports_tools`,
+`supports_pdf_input`, `supports_structured_output`. Plus the typed structs:
+`Message`, `Choice`, `ToolCall`, `FunctionCall`, `Citation`, `ModelResponse`,
+`StreamChunk`, `EmbeddingResponse`, every `*Error`.
 
-### Python Style
-- **Target Python 3.13+** - Use modern typing syntax
-- Use `from __future__ import annotations` in all files
-- Type hints are required for all public functions
-- Use `__slots__` for dataclasses when possible
-- Follow ruff/pyright strict mode
+Targets Python 3.12+. Wire-shape compatible with LiteLLM SDK calls — most
+existing LiteLLM code keeps working with `import arcllm as litellm`.
 
-### Naming Conventions
-- Modules: `snake_case.py`
-- Classes: `PascalCase`
-- Functions/methods: `snake_case`
-- Constants: `UPPER_SNAKE_CASE`
-- Private: prefix with `_`
+## Common commands
 
-### Import Style
-```python
-from __future__ import annotations
+```bash
+# Install (editable) with dev tools
+pip install -e ".[dev]"
 
-import json
-import os
-from typing import Any
+# Unit tests (mocked HTTP — no live API calls)
+pytest tests/ --ignore=tests/integration
 
-from arcllm.types import ModelResponse
-from arcllm.exceptions import ArcLLMError
+# A single test or test file
+pytest tests/test_core.py
+pytest tests/test_core.py::TestCompletion::test_simple
+
+# A single provider's unit tests
+pytest tests/providers/test_openai.py
+
+# Live integration tests (need API keys in env)
+OPENAI_API_KEY=sk-... pytest tests/integration/test_openai_integration.py
+
+# Lint + format + type-check (CI runs these in strict mode)
+ruff check arcllm tests scripts benchmarks
+ruff format --check arcllm tests scripts benchmarks
+mypy arcllm --strict
+pyright arcllm
+
+# Coverage gate (CI floor: 80%)
+pytest tests/ --ignore=tests/integration --cov=arcllm --cov-fail-under=80
+
+# Benchmarks (see benchmarks/README.md)
+python benchmarks/overhead.py            # mocked microbenchmarks
+python benchmarks/live_matrix.py         # live cross-provider TTFT
+python benchmarks/vs_litellm.py          # arcllm vs litellm subprocess comparison
 ```
+
+Pytest config in `pyproject.toml`: `asyncio_mode = "auto"` (no decorator
+needed on async tests), markers `smoke` / `slow` / `integration` plus per-
+provider markers (`openai`, `anthropic`, `gemini`, `groq`, ...).
+
+CI: 3.12 + 3.13 + 3.14-dev (allow-fail). Lint/format/types are strict. Live
+integration tests are nightly + manual-dispatch only (cost-safe default).
 
 ## Architecture
 
 ```
 arcllm/
-├── __init__.py          # Public API exports
-├── types.py             # All dataclasses (ModelResponse, etc.)
-├── exceptions.py        # Exception classes
-├── core.py              # Main API functions (completion, etc.)
+├── __init__.py            # Public API surface and __all__
+├── core.py                # completion / acompletion / embedding entry points
+├── types.py               # msgspec.Struct response shapes (incl. Citation)
+├── exceptions.py          # ArcLLMError + subclasses
 ├── http/
-│   ├── client.py        # Sync HTTP client
-│   ├── async_client.py  # Async HTTP client
-│   └── sse.py           # SSE parser
+│   ├── client.py          # Sync HTTP (httpx + HTTP/2)
+│   ├── async_client.py    # Async HTTP (aiohttp)
+│   └── sse.py             # Hand-rolled SSE parser (sync + async)
 ├── providers/
-│   ├── base.py          # Adapter protocol & registry
+│   ├── base.py            # Adapter protocol, BaseAdapter, registry, COMMON_PARAMS
 │   ├── openai_adapter.py
 │   ├── anthropic_adapter.py
-│   └── ...              # One file per provider
-├── pricing/
-│   └── tables.py        # Pricing data
-└── capabilities/
-    └── tables.py        # Model capabilities
+│   ├── gemini_adapter.py
+│   ├── ...                # one file per provider
+│   ├── bedrock_adapter.py # multi-family dispatch (Anthropic / OpenAI / Llama / Mistral / Cohere / Nova / Titan / AI21)
+│   ├── vertex_adapter.py  # multi-publisher dispatch (Google / Anthropic / Mistral / Meta)
+│   ├── azure_adapter.py   # Azure OpenAI + Azure AI Foundry serverless
+│   └── databricks_adapter.py # OpenAI-shape over /serving-endpoints/{name}/invocations
+├── pricing/tables.py      # Generated by scripts/sync_tables.py
+└── capabilities/tables.py # Generated by scripts/sync_tables.py
 ```
 
-## Key Invariants
+Request flow: parse model string → `get_provider(name)` → adapter
+`build_request` → HTTP client (sync or async) → adapter `parse_response` /
+`parse_stream_event` → typed `ModelResponse` / `StreamChunk`.
 
-### 1. Response Structure
-All responses must have this structure:
-```python
-response.choices[0].message.content  # Always accessible
-response.choices[0].message.tool_calls  # List[ToolCall] or None
-response.model_extra["usage"]  # Dict with token counts
-```
+Providers are **lazy-loaded**: `get_provider("anthropic")` triggers the
+import. Adding `provider_name` doesn't slow cold start until used.
 
-### 2. Tool Calls Format
-Tool calls must follow OpenAI format:
-```python
-tool_call.id = "call_xxx"
-tool_call.type = "function"
-tool_call.function.name = "function_name"
-tool_call.function.arguments = '{"json": "string"}'  # JSON STRING
-```
+## Key invariants
 
-### 3. Usage Tracking
-- Always use provider-reported usage
-- Never count tokens ourselves
-- Usage can be None if provider doesn't report it
+1. **OpenAI-shape responses.** Every adapter returns
+   `ModelResponse.choices[0].message.{content, tool_calls, citations}`.
+   Tool call arguments are a **JSON string**, not a dict.
+2. **Provider-reported usage only.** Never count tokens locally;
+   `usage` may be `None` if the provider didn't return it.
+3. **Errors carry `provider`.** Every adapter maps HTTP errors to the right
+   `ArcLLMError` subclass and includes `provider=self.provider_name`. Preserve
+   `request_id` when available.
+4. **Capability-aware param routing.** `BaseAdapter._check_params(model, ...)`
+   drops `temperature`/`top_p`/`stop` for models whose capability table flags
+   them as unsupported. Reasoning models (o-series, Claude with thinking,
+   Gemini 2.5+ with thinking) get capability-driven filtering automatically.
+5. **`from __future__ import annotations`** in every module; `__slots__` /
+   `msgspec.Struct` for hot-path types.
+6. **Curated runtime deps**: `httpx[http2]`, `aiohttp`, `msgspec`, `orjson`.
+   Adding a new runtime dep requires an issue and maintainer approval.
+7. **Tools pass-through**: callers may include provider-native server-side
+   tools (Anthropic `web_search_*` / `code_execution_*`, Gemini
+   `google_search` / `code_execution`, OpenAI `web_search` / `file_search`)
+   alongside `{"type": "function"}` entries; the adapters preserve native
+   tool blocks verbatim.
 
-### 4. Error Handling
-- Map all provider errors to arcllm exception classes
-- Include provider name in all exceptions
-- Preserve request_id when available
+## Modern reasoning models
 
-## Running Tests
+Three pseudo-OpenAI params ride on top of `COMMON_PARAMS`:
 
-```bash
-# Install dev dependencies
-pip install -e ".[dev]"
+| Param | Provider mapping |
+| --- | --- |
+| `reasoning_effort` (`"low"|"medium"|"high"`) | OpenAI o-series + GPT-5 + Azure + Databricks-GPT-5 + Perplexity |
+| `thinking_budget` (int tokens) | Anthropic `thinking={"type":"enabled","budget_tokens":N}`; Gemini `generationConfig.thinkingConfig.thinkingBudget`; Bedrock-Anthropic + Vertex-Anthropic + Databricks-Claude pass through |
+| `include_thoughts` (bool) | Gemini `generationConfig.thinkingConfig.includeThoughts` |
 
-# Run all tests
-pytest
+When `thinking_budget` is set on Anthropic-shape paths the adapter strips
+`temperature`/`top_p` (Anthropic 400s when both are present).
 
-# Run with coverage
-pytest --cov=arcllm
+## Citations + grounded responses
 
-# Run specific test file
-pytest tests/test_types.py
+`Message.citations: list[Citation] | None` is populated by:
 
-# Run type checking
-mypy arcllm
+- **Perplexity Sonar**: top-level `citations` (legacy URLs) or
+  `search_results` (URL + title + snippet).
+- **Gemini grounding**: `candidates[].groundingMetadata.groundingChunks` paired
+  with `groundingSupports` for offsets.
+- **Anthropic web_search**: `web_search_tool_result` blocks plus inline
+  `citations` annotations on text blocks (annotations win when both name the
+  same URL — they carry `start_index`/`end_index`).
 
-# Run linting
-ruff check arcllm
-ruff format arcllm
-```
+Streaming: citations arrive on the final chunk for the providers that grow
+them incrementally; on Perplexity they're available the moment the response
+parses.
 
-## Adding/Updating Features
+## Adding a provider
 
-### Adding a New Provider
-See `docs/ADDING_A_PROVIDER.md` for detailed instructions.
+See `docs/ADDING_A_PROVIDER.md` for the deep walkthrough.
 
 Quick checklist:
-1. Create `providers/newprovider_adapter.py`
-2. Implement Adapter protocol
-3. Register in `providers/base.py`
-4. Add pricing to `pricing/tables.py`
-5. Add capabilities to `capabilities/tables.py`
-6. Write tests in `tests/providers/`
 
-### Updating Pricing
-1. Edit `arcllm/pricing/tables.py`
-2. Update `PRICING_VERSION` at top of file
-3. Run tests: `pytest tests/test_pricing.py`
+1. `arcllm/providers/<name>_adapter.py` — subclass `BaseAdapter` (or
+   `OpenAIAdapter` / `GeminiAdapter` for OpenAI-shape compatible APIs). Set
+   `provider_name`. Override `supported_params` if you accept extras.
+2. `arcllm/providers/base.py` — append to `SUPPORTED_PROVIDERS` and the
+   registry.
+3. **Refresh `tmp/model_manifests/<provider>.json`** with the model list
+   (see "Updating tables" below).
+4. Run `python scripts/sync_tables.py` — regenerates pricing + capabilities
+   tables from manifests. Idempotent.
+5. Add unit tests in `tests/providers/test_<name>.py` (mocked HTTP).
+6. Add live tests in `tests/integration/test_<name>_integration.py`
+   subclassing `IntegrationTestBase`.
 
-### Updating Capabilities
-1. Edit `arcllm/capabilities/tables.py`
-2. Update `CAPABILITIES_VERSION` at top of file
-3. Run tests: `pytest tests/test_capabilities.py`
+## Updating tables (pricing + capabilities)
 
-### Adding a New Parameter
-1. Add to `COMMON_PARAMS` in `providers/base.py` if common
-2. Or add to specific adapter's `supported_params`
-3. Handle in `build_request()` method
-4. Add tests
+The two tables (`arcllm/pricing/tables.py` + `arcllm/capabilities/tables.py`)
+are **generated**. Don't hand-edit.
 
-## Common Tasks
+1. Update the appropriate `tmp/model_manifests/<provider>.json`.
+2. Run `python scripts/sync_tables.py`.
+3. Run `pytest tests/test_tables_parity.py` — the parity test asserts every
+   priced model has a capability entry and vice-versa.
 
-### Fix a Bug
-1. Write a failing test first
-2. Fix the bug
-3. Verify test passes
-4. Run full test suite
+The generator drives the per-model param-restriction flags
+(`supports_temperature`, `supports_stop_sequences`,
+`supports_reasoning_effort`) from `kind`. Reasoning models (`kind="reason"`)
+default to `supports_temperature=False`, `supports_reasoning_effort=True`.
+Override per-model with explicit flags in the manifest entry.
 
-### Add Tests
-- Unit tests go in `tests/`
-- Provider tests go in `tests/providers/`
-- Use fixtures from `tests/conftest.py`
-- Test both success and error cases
+## Common patterns
 
-### Update Dependencies
-- Runtime: NO new dependencies (stdlib only)
-- Dev: Update in `pyproject.toml [project.optional-dependencies]`
+### Provider adapter
 
-## Do's and Don'ts
-
-### DO
-- Keep modules small and focused
-- Use explicit types everywhere
-- Test edge cases
-- Preserve backwards compatibility
-- Document public APIs
-
-### DON'T
-- Add runtime dependencies
-- Count tokens ourselves
-- Block the event loop in async code
-- Swallow exceptions silently
-- Break the response interface contract
-
-## Common Patterns
-
-### Provider Adapter Pattern
 ```python
+from arcllm.providers.base import BaseAdapter, RequestData
+
 class NewAdapter(BaseAdapter):
     provider_name = "newprovider"
-    
-    def build_request(self, *, model, messages, **kwargs) -> RequestData:
-        # Convert to provider format
+
+    def build_request(self, *, model, messages, stream=False, drop_params=False, **kwargs):
+        kwargs = self._check_params(model, drop_params, **kwargs)
         body = self._build_body(model, messages, **kwargs)
-        return RequestData(method="POST", url=url, headers=headers, body=body)
-    
-    def parse_response(self, data: bytes, model: str) -> ModelResponse:
-        # Parse provider response
-        resp = json.loads(data)
-        return self._build_model_response(resp, model)
+        return RequestData(method="POST", url=..., headers=..., body=orjson.dumps(body))
 ```
 
-### Error Mapping Pattern
+### Error mapping
+
 ```python
-def parse_error(self, status_code, data, request_id):
+def parse_error(self, status_code, data, request_id=None):
     message = self._extract_error_message(data)
-    
     if status_code == 401:
-        return AuthenticationError(message, provider=self.provider_name)
-    elif status_code == 429:
-        return RateLimitError(message, provider=self.provider_name)
-    # ... etc
+        return AuthenticationError(message, provider=self.provider_name, request_id=request_id)
+    if status_code == 429:
+        return RateLimitError(message, provider=self.provider_name, request_id=request_id)
+    return ProviderAPIError(message, provider=self.provider_name, status_code=status_code)
 ```
 
-### Streaming Pattern
+### Streaming
+
 ```python
 def parse_stream_event(self, data: str, model: str) -> StreamChunk | None:
     if not data or data == "[DONE]":
         return None
-    
-    event = json.loads(data)
+    event = orjson.loads(data)
     return StreamChunk(
         id=event.get("id", ""),
         choices=[self._parse_chunk_choice(c) for c in event.get("choices", [])],
     )
 ```
 
-## Debugging Tips
+## Performance notes
 
-1. **Request Issues**: Print `request.body.decode()` to see what's being sent
-2. **Response Issues**: Print raw bytes before parsing
-3. **Streaming Issues**: Check SSE parser output with test data
-4. **Auth Issues**: Verify env vars are set correctly
+- HTTP/2 connection pooling on the sync path (`httpx`); aiohttp pool on the
+  async path. Singleton clients in `core.py`; the async client tracks
+  `_async_client_loop_id` to handle event-loop changes.
+- SSL contexts are cached at module level (creating one is ~5ms; reusing
+  saves it on every cold start).
+- `msgspec.Struct` is ~3x faster than `dataclasses` for instantiation +
+  serialisation; we use it for every wire-shape type.
+- `orjson` for request body serialisation; ~3x faster than stdlib `json`.
+- Lazy provider imports — first call to `get_provider("anthropic")` triggers
+  the import; cold start stays fast.
+- For async workloads on Unix, pip-install `uvloop` and call
+  `arcllm.install_uvloop()` once at startup; ~10–15% wins on heavy concurrent
+  workloads.
 
-## Performance Considerations
+## Lint / type config
 
-- Minimize object allocations in hot paths
-- Use `__slots__` for dataclasses
-- Avoid unnecessary JSON parsing
-- Reuse HTTP connections when possible
-- Don't import heavy modules at startup
+- `ruff` strict mode (`ANN`, `PERF`, `SLOT`, `T20`, ...). `tests/` and
+  `benchmarks/` ignore `T20` (print) and `ANN`. `scripts/` additionally
+  ignores `SIM108`.
+- `PLC0415` (import-not-at-top) is globally off — we use lazy imports for
+  cold-start performance and registry decoupling.
+- `mypy --strict` and `pyright --strict` both run in CI. Don't silence type
+  errors with `# type: ignore` unless unavoidable; if you must, narrow it
+  (e.g. `# type: ignore[arg-type]`) and add a one-line rationale.
+
+## DO / DON'T
+
+### DO
+
+- Keep modules small + focused (one provider per file).
+- Use explicit type annotations on public functions.
+- Test edge cases — error paths, malformed responses, partial chunks.
+- Document non-obvious behaviour with a comment that explains the *why*.
+
+### DON'T
+
+- Add a fifth runtime dep without an approved issue.
+- Count tokens ourselves — provider-reported usage only.
+- Block the event loop in async code (no `time.sleep`, no sync I/O on hot
+  async paths).
+- Swallow exceptions silently — always re-raise as an `ArcLLMError`.
+- Break the response interface contract.
+
+## Debugging tips
+
+- **Request shape**: log `request.body.decode("utf-8")` before sending.
+- **Response shape**: log raw bytes before parsing.
+- **Stream**: feed canned SSE bytes through `arcllm.http.sse.SSEParser` to
+  isolate parser issues from network ones.
+- **Auth**: print env-var presence, never the value (use `"...".endswith(key[-4:])`).
+- **Capability filtering**: `python -c "from arcllm.capabilities.tables import get_model_capabilities; print(get_model_capabilities('your-model'))"` to see what flags the table claims.

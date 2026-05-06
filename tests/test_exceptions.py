@@ -3,13 +3,16 @@ Tests for arcllm.exceptions module.
 """
 
 from arcllm.exceptions import (
-    AuthenticationError,
-    ContentFilterError,
     ArcLLMError,
+    AuthenticationError,
+    BudgetExceededError,
+    ContentFilterError,
+    InternalServerError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
     ResponseParseError,
+    ServiceUnavailableError,
     TimeoutError,
     UnsupportedModelError,
     UnsupportedParameterError,
@@ -193,12 +196,63 @@ class TestMapStatusCode:
         error = map_status_code_to_exception(408, "Request Timeout")
         assert isinstance(error, TimeoutError)
 
-    def test_map_500_to_provider_error(self):
-        """Test 500 maps to ProviderAPIError."""
+    def test_map_500_to_internal_server_error(self):
+        """500 → InternalServerError (subclass of ProviderAPIError)."""
         error = map_status_code_to_exception(500, "Server Error")
+        assert isinstance(error, InternalServerError)
+        assert isinstance(error, ProviderAPIError)  # back-compat catch
+
+    def test_map_503_to_service_unavailable(self):
+        """503 gets its own subclass for retry-with-backoff classification."""
+        error = map_status_code_to_exception(503, "Service Unavailable")
+        assert isinstance(error, ServiceUnavailableError)
         assert isinstance(error, ProviderAPIError)
 
+    def test_map_402_to_budget_exceeded(self):
+        """402 (Payment Required) maps to BudgetExceededError."""
+        error = map_status_code_to_exception(402, "Payment Required")
+        assert isinstance(error, BudgetExceededError)
+        assert isinstance(error, ProviderAPIError)
+
+    def test_map_429_with_quota_message_to_budget_exceeded(self):
+        """429 with quota / billing wording is a budget issue, not a rate limit.
+
+        OpenAI conflates the two on 429 — disambiguating here lets callers
+        decide between back-off (RateLimitError) and stop-and-bill
+        (BudgetExceededError).
+        """
+        error = map_status_code_to_exception(
+            429, "You exceeded your current quota, please check your plan and billing"
+        )
+        assert isinstance(error, BudgetExceededError)
+        assert not isinstance(error, RateLimitError)
+
+    def test_map_429_without_quota_message_stays_rate_limit(self):
+        error = map_status_code_to_exception(429, "Rate limit exceeded; retry in 30s")
+        assert isinstance(error, RateLimitError)
+        assert not isinstance(error, BudgetExceededError)
+
     def test_map_unknown_to_provider_error(self):
-        """Test unknown status maps to ProviderAPIError."""
+        """Unknown status maps to ProviderAPIError."""
         error = map_status_code_to_exception(418, "I'm a teapot")
         assert isinstance(error, ProviderAPIError)
+
+
+class TestNewExceptionClasses:
+    """Direct construction smoke for the new subclasses."""
+
+    def test_budget_exceeded_carries_metadata(self):
+        err = BudgetExceededError("quota exhausted", provider="openai", status_code=429)
+        assert err.provider == "openai"
+        assert err.status_code == 429
+        assert isinstance(err, ProviderAPIError)
+
+    def test_service_unavailable_inherits_provider_api(self):
+        err = ServiceUnavailableError("region down", provider="bedrock", status_code=503)
+        assert err.provider == "bedrock"
+        assert isinstance(err, ProviderAPIError)
+
+    def test_internal_server_inherits_provider_api(self):
+        err = InternalServerError("oops", provider="anthropic", status_code=500)
+        assert err.provider == "anthropic"
+        assert isinstance(err, ProviderAPIError)

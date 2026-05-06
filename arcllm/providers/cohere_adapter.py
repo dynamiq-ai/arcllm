@@ -10,17 +10,20 @@ Cohere uses a different API format than OpenAI with:
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import orjson
 
 from arcllm.exceptions import (
     ArcLLMError,
     AuthenticationError,
+    BudgetExceededError,
+    InternalServerError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
     ResponseParseError,
+    ServiceUnavailableError,
     UnsupportedModelError,
 )
 from arcllm.providers.base import (
@@ -40,6 +43,8 @@ from arcllm.types import (
     FunctionCall,
     Message,
     ModelResponse,
+    RerankResponse,
+    RerankResult,
     StreamChunk,
     ToolCall,
     Usage,
@@ -158,7 +163,7 @@ class CohereAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> RequestData:
         """Build Cohere chat request."""
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         system_message, cohere_messages = self._convert_messages(messages)
 
@@ -286,7 +291,7 @@ class CohereAdapter(BaseAdapter):
         message = Message(
             role="assistant",
             content=text_content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls or None,
         )
 
         # Map finish reason
@@ -478,40 +483,30 @@ class CohereAdapter(BaseAdapter):
         except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
 
+        common_kwargs: dict[str, Any] = {
+            "provider": self.provider_name,
+            "status_code": status_code,
+            "request_id": request_id,
+        }
+        message_lower = (message or "").lower()
+
         if status_code == 401:
-            return AuthenticationError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return AuthenticationError(message, **common_kwargs)
+        if status_code == 402:
+            return BudgetExceededError(message, **common_kwargs)
         if status_code == 429:
-            return RateLimitError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            if any(token in message_lower for token in ("quota", "billing", "credit")):
+                return BudgetExceededError(message, **common_kwargs)
+            return RateLimitError(message, **common_kwargs)
         if status_code == 400:
-            return InvalidRequestError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return InvalidRequestError(message, **common_kwargs)
         if status_code == 404:
-            return UnsupportedModelError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
-        return ProviderAPIError(
-            message,
-            provider=self.provider_name,
-            status_code=status_code,
-            request_id=request_id,
-        )
+            return UnsupportedModelError(message, **common_kwargs)
+        if status_code == 503:
+            return ServiceUnavailableError(message, **common_kwargs)
+        if status_code >= 500:
+            return InternalServerError(message, **common_kwargs)
+        return ProviderAPIError(message, **common_kwargs)
 
     def build_embedding_request(
         self,
@@ -520,11 +515,17 @@ class CohereAdapter(BaseAdapter):
         input: list[str],
         **kwargs: Any,
     ) -> RequestData:
-        """Build Cohere embedding request."""
+        """Build Cohere /v2/embed request.
+
+        Cohere v2 returns embeddings keyed by dtype (``float``, ``int8`` …).
+        We always request ``["float"]`` so callers get a uniform shape, and
+        :meth:`parse_embedding_response` reads from ``embeddings.float``.
+        """
         body: dict[str, Any] = {
             "model": model,
             "texts": input,
             "input_type": kwargs.get("input_type", "search_document"),
+            "embedding_types": kwargs.get("embedding_types", ["float"]),
         }
 
         if "truncate" in kwargs:
@@ -542,7 +543,13 @@ class CohereAdapter(BaseAdapter):
         )
 
     def parse_embedding_response(self, data: bytes, model: str) -> EmbeddingResponse:
-        """Parse Cohere embedding response."""
+        """Parse Cohere v2 ``/embed`` response.
+
+        v2 returns ``{"embeddings": {"float": [[...], ...]}, "meta": {...}}``;
+        we only request ``float`` (see :meth:`build_embedding_request`) so
+        we always read from ``embeddings.float``. Falls back to v1's flat
+        list if a custom ``api_base`` was pointed at the v1 endpoint.
+        """
         try:
             resp = orjson.loads(data)
         except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
@@ -552,16 +559,18 @@ class CohereAdapter(BaseAdapter):
                 raw_data=data,
             ) from e
 
-        embeddings: list[EmbeddingData] = []
-        for i, emb in enumerate(resp.get("embeddings", [])):
-            embeddings.append(
-                EmbeddingData(
-                    index=i,
-                    embedding=emb,
-                )
-            )
+        raw_embeddings = resp.get("embeddings")
+        if isinstance(raw_embeddings, dict):
+            # v2 shape: {"float": [[...], ...], "int8": [[...], ...], ...}
+            vectors: list[list[float]] = raw_embeddings.get("float") or []
+        elif isinstance(raw_embeddings, list):
+            # v1 shape: list of vectors directly
+            vectors = raw_embeddings
+        else:
+            vectors = []
 
-        # Cohere provides billed_units for usage
+        embeddings = [EmbeddingData(index=i, embedding=v) for i, v in enumerate(vectors)]
+
         meta = resp.get("meta", {})
         billed = meta.get("billed_units", {})
 
@@ -572,6 +581,81 @@ class CohereAdapter(BaseAdapter):
                 prompt_tokens=billed.get("input_tokens", 0),
                 total_tokens=billed.get("input_tokens", 0),
             ),
+        )
+
+    # ------------------------------------------------------------------
+    # Rerank surface
+    # ------------------------------------------------------------------
+
+    def build_rerank_request(
+        self,
+        *,
+        model: str,
+        query: str,
+        documents: list[str],
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build a Cohere ``/v2/rerank`` request.
+
+        Reference: https://docs.cohere.com/v2/reference/rerank
+        """
+        body: dict[str, Any] = {
+            "model": model,
+            "query": query,
+            "documents": documents,
+        }
+        if "top_n" in kwargs and kwargs["top_n"] is not None:
+            body["top_n"] = int(kwargs["top_n"])
+        if "return_documents" in kwargs:
+            body["return_documents"] = bool(kwargs["return_documents"])
+        if "max_chunks_per_doc" in kwargs:
+            body["max_chunks_per_doc"] = int(kwargs["max_chunks_per_doc"])
+
+        # ``api_base`` already ends in ``/v2`` for the Cohere adapter; rerank
+        # is exposed at the same /v2 root, so we just append ``/rerank``.
+        url = f"{self._api_base.rstrip('/')}/rerank"
+        return RequestData(
+            method="POST",
+            url=url,
+            headers=self._get_headers(),
+            body=orjson.dumps(body),
+            timeout=self.config.timeout,
+        )
+
+    def parse_rerank_response(self, data: bytes, model: str) -> RerankResponse:
+        """Parse Cohere rerank response into the unified arcllm shape."""
+        try:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ResponseParseError(
+                f"Failed to parse rerank response: {exc}",
+                provider=self.provider_name,
+                raw_data=data,
+            ) from exc
+
+        results: list[RerankResult] = []
+        for raw_item in resp.get("results") or []:
+            if not isinstance(raw_item, dict):
+                continue
+            item = cast("dict[str, Any]", raw_item)
+            doc_field = item.get("document")
+            doc_text: str | None = None
+            if isinstance(doc_field, dict):
+                doc_text = cast("dict[str, Any]", doc_field).get("text")
+            elif isinstance(doc_field, str):
+                doc_text = doc_field
+            results.append(
+                RerankResult(
+                    index=int(item.get("index", 0)),
+                    relevance_score=float(item.get("relevance_score", 0.0)),
+                    document=doc_text,
+                )
+            )
+
+        return RerankResponse(
+            id=str(resp.get("id") or ""),
+            model=model,
+            results=results,
         )
 
 

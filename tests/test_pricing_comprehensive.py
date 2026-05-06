@@ -76,10 +76,10 @@ class TestPricingLookup:
         [
             ("gpt-4o", 2.50, 10.00),
             ("gpt-4o-mini", 0.15, 0.60),
-            ("gpt-4-turbo", 10.00, 30.00),
-            ("gpt-3.5-turbo", 0.50, 1.50),
-            ("o1", 15.00, 60.00),
-            ("o1-mini", 3.00, 12.00),
+            ("gpt-5", 1.25, 10.00),
+            ("gpt-5-mini", 0.25, 2.00),
+            ("o3", 2.00, 8.00),
+            ("o4-mini", 1.10, 4.40),
         ],
     )
     def test_openai_pricing_values(self, model, expected_input, expected_output):
@@ -91,17 +91,17 @@ class TestPricingLookup:
     @pytest.mark.parametrize(
         "model",
         [
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229",
-            "claude-3-haiku-20240307",
+            "claude-sonnet-4-5-20250929",
+            "claude-haiku-4-5-20251001",
+            "claude-opus-4-5-20251101",
+            "claude-opus-4-1-20250805",
         ],
     )
     def test_anthropic_models_have_cached_pricing(self, model):
-        """Test that Claude 3+ models have cached input pricing."""
+        """Test that current Claude models have cached input pricing."""
         pricing = get_model_pricing(model)
         assert pricing.cached_input_cost_per_million is not None
-        # Cached should be ~10% of regular input
+        # Cached should be cheaper than regular input
         assert pricing.cached_input_cost_per_million < pricing.input_cost_per_million
 
     def test_embedding_models_zero_output_cost(self):
@@ -117,10 +117,10 @@ class TestPricingLookup:
             assert pricing.output_cost_per_million == 0.0
 
     def test_free_models_zero_cost(self):
-        """Test that free/preview models have zero cost."""
+        """Local Ollama models are billed as $0/$0 (run on the user's hardware)."""
         free_models = [
-            "gemini-2.0-flash-exp",
-            "gemini-2.0-flash-thinking-exp",
+            "ollama/llama3.3",
+            "ollama/qwen3",
         ]
         for model in free_models:
             pricing = get_model_pricing(model)
@@ -260,28 +260,36 @@ class TestAllProvidersPricingCoverage:
             assert provider in ALL_PRICING
             assert len(ALL_PRICING[provider]) > 0
 
-    def test_vertex_uses_gemini_pricing(self):
-        """Test that vertex_ai uses same pricing as gemini."""
-        assert ALL_PRICING["vertex_ai"] is ALL_PRICING["gemini"]
+    def test_vertex_overlaps_with_gemini_pricing(self):
+        """Vertex AI tracks the same Gemini model families as direct Gemini.
+
+        The two tables are now distinct objects (Vertex on-prem pricing differs
+        from AI Studio for some 2.0 models — see Phase 3 manifest), but the set
+        of model IDs should largely overlap.
+        """
+        gemini_ids = set(ALL_PRICING["gemini"].keys())
+        vertex_ids = set(ALL_PRICING["vertex_ai"].keys())
+        overlap = gemini_ids & vertex_ids
+        assert len(overlap) >= 5  # at least the current GA Gemini family
 
     @pytest.mark.parametrize(
         "table,model",
         [
             (OPENAI_PRICING, "gpt-4o"),
-            (ANTHROPIC_PRICING, "claude-3-5-sonnet-20241022"),
-            (GEMINI_PRICING, "gemini-1.5-pro"),
+            (ANTHROPIC_PRICING, "claude-sonnet-4-5-20250929"),
+            (GEMINI_PRICING, "gemini-2.5-pro"),
             (MISTRAL_PRICING, "mistral-large-latest"),
-            (COHERE_PRICING, "command-r-plus"),
+            (COHERE_PRICING, "command-a-03-2025"),
             (GROQ_PRICING, "llama-3.3-70b-versatile"),
-            (TOGETHER_PRICING, "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
-            (FIREWORKS_PRICING, "accounts/fireworks/models/llama-v3p3-70b-instruct"),
-            (DEEPSEEK_PRICING, "deepseek-chat"),
+            (TOGETHER_PRICING, "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"),
+            (FIREWORKS_PRICING, "accounts/fireworks/models/deepseek-v4-pro"),
+            (DEEPSEEK_PRICING, "deepseek-v4-flash"),
             (PERPLEXITY_PRICING, "sonar-pro"),
         ],
     )
     def test_provider_tables_have_flagship_models(self, table, model):
-        """Test that each provider table contains flagship models."""
-        assert model in table
+        """Each provider table contains its current flagship model."""
+        assert model in table, f"{model!r} missing from provider table"
         pricing = table[model]
         assert isinstance(pricing, ModelPricing)
         assert pricing.input_cost_per_million >= 0

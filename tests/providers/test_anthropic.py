@@ -138,6 +138,99 @@ class TestBuildRequest:
         body = json.loads(request.body.decode("utf-8"))
         assert body["stop_sequences"] == ["END", "STOP"]
 
+    def test_pdf_input_file_converts_to_document_block(self, adapter):
+        """OpenAI-shape ``input_file`` content -> Anthropic ``document`` block (base64)."""
+        request = adapter.build_request(
+            model="claude-sonnet-4-5-20250929",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_file",
+                            "file": {
+                                "data": "JVBERi0xLjQKJeLjz9MK",  # fake base64 PDF header
+                                "media_type": "application/pdf",
+                            },
+                        },
+                        {"type": "text", "text": "Summarise"},
+                    ],
+                }
+            ],
+            max_tokens=64,
+        )
+
+        body = json.loads(request.body.decode("utf-8"))
+        msg = body["messages"][0]
+        assert msg["role"] == "user"
+        assert isinstance(msg["content"], list)
+        # First block is the document
+        doc = msg["content"][0]
+        assert doc["type"] == "document"
+        assert doc["source"]["type"] == "base64"
+        assert doc["source"]["media_type"] == "application/pdf"
+        assert doc["source"]["data"] == "JVBERi0xLjQKJeLjz9MK"
+        # Second block is the text
+        assert msg["content"][1] == {"type": "text", "text": "Summarise"}
+
+    def test_pdf_data_url_converts_to_document_block(self, adapter):
+        """data:application/pdf URL also converts to base64 document block."""
+        request = adapter.build_request(
+            model="claude-sonnet-4-5-20250929",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_file",
+                            "file": {"data": "data:application/pdf;base64,JVBERg=="},
+                        },
+                    ],
+                }
+            ],
+            max_tokens=64,
+        )
+
+        body = json.loads(request.body.decode("utf-8"))
+        doc = body["messages"][0]["content"][0]
+        assert doc["type"] == "document"
+        assert doc["source"]["type"] == "base64"
+        assert doc["source"]["media_type"] == "application/pdf"
+        assert doc["source"]["data"] == "JVBERg=="
+
+    def test_anthropic_native_blocks_pass_through(self, adapter):
+        """Callers can already supply Anthropic-native blocks; we don't double-wrap."""
+        native = {
+            "type": "document",
+            "source": {"type": "url", "url": "https://example.com/doc.pdf"},
+        }
+        request = adapter.build_request(
+            model="claude-sonnet-4-5-20250929",
+            messages=[{"role": "user", "content": [native, {"type": "text", "text": "Read"}]}],
+            max_tokens=64,
+        )
+        body = json.loads(request.body.decode("utf-8"))
+        assert body["messages"][0]["content"][0] == native
+
+    def test_build_request_with_thinking_budget(self, adapter):
+        """thinking_budget should emit Anthropic's thinking block.
+
+        Per Anthropic docs, when thinking is enabled the API rejects
+        ``temperature``/``top_p`` — the adapter strips them defensively.
+        """
+        request = adapter.build_request(
+            model="claude-opus-4-7",
+            messages=[{"role": "user", "content": "Solve this hard problem"}],
+            max_tokens=4096,
+            thinking_budget=2048,
+            temperature=0.7,
+        )
+
+        body = json.loads(request.body.decode("utf-8"))
+        assert body["thinking"] == {"type": "enabled", "budget_tokens": 2048}
+        assert "temperature" not in body
+        assert "top_p" not in body
+
 
 class TestMessageConversion:
     """Tests for message conversion."""

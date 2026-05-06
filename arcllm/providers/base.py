@@ -24,7 +24,9 @@ from arcllm.exceptions import (
 if TYPE_CHECKING:
     from arcllm.types import (
         EmbeddingResponse,
+        ImageResponse,
         ModelResponse,
+        RerankResponse,
         StreamChunk,
     )
 
@@ -60,6 +62,19 @@ SUPPORTED_PROVIDERS = [
     "perplexity",
     "databricks",
     "ollama",
+    # Tier A — OpenAI-compat thin wrappers added in 0.4.0
+    "xai",
+    "openrouter",
+    "nvidia_nim",
+    "cerebras",
+    "sambanova",
+    "deepinfra",
+    # Tier B — bespoke or aliased adapters added in 0.4.0
+    "huggingface",
+    "watsonx",
+    "ai21",
+    "azure_ai",
+    "custom",
 ]
 
 
@@ -100,7 +115,8 @@ class RequestData:
     timeout: float = 60.0
 
 
-# Common parameters supported by most providers
+# Common parameters supported by most providers (or accepted at the SDK
+# surface and translated/dropped per-provider).
 COMMON_PARAMS = {
     "model",
     "messages",
@@ -119,6 +135,12 @@ COMMON_PARAMS = {
     "logprobs",
     "top_logprobs",
     "user",
+    # Reasoning / thinking model params. Each adapter decides what to do with
+    # them — pass through, translate to the provider-specific shape, or drop.
+    # The capability table tells us which models actually accept them.
+    "reasoning_effort",  # OpenAI, Azure, Databricks, Perplexity (low/medium/high)
+    "thinking_budget",  # Anthropic (-> thinking.budget_tokens), Gemini (-> thinkingConfig.thinkingBudget)
+    "include_thoughts",  # Gemini-specific (-> thinkingConfig.includeThoughts)
 }
 
 
@@ -292,6 +314,57 @@ class Adapter(Protocol):
         """
         ...
 
+    def build_image_generation_request(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build an image-generation HTTP request (override when supported)."""
+        ...
+
+    def build_image_variation_request(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build an image-variation HTTP request (override when supported)."""
+        ...
+
+    def build_image_edit_request(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        prompt: str,
+        mask: bytes | str | None = None,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build an image-edit HTTP request (override when supported)."""
+        ...
+
+    def parse_image_response(self, data: bytes, model: str) -> ImageResponse:
+        """Parse an image-generation/variation/edit response."""
+        ...
+
+    def build_rerank_request(
+        self,
+        *,
+        model: str,
+        query: str,
+        documents: list[str],
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build a rerank HTTP request (override when supported)."""
+        ...
+
+    def parse_rerank_response(self, data: bytes, model: str) -> RerankResponse:
+        """Parse a rerank response."""
+        ...
+
 
 class BaseAdapter(ABC):
     """
@@ -317,35 +390,108 @@ class BaseAdapter(ABC):
 
     def _check_params(
         self,
+        model: str,
         drop_params: bool,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """
-        Check and filter parameters based on provider support.
+        """Validate request kwargs against both adapter and per-model capability tables.
+
+        Two-stage filter:
+
+        1. **Adapter level** (provider-wide ``supported_params``): honors the
+           caller's ``drop_params`` flag. Strict mode raises
+           :class:`UnsupportedParameterError`.
+        2. **Model level** (capability table): always drops with
+           :func:`warnings.warn`. Reason: capability mismatches reflect known
+           model restrictions (e.g. ``temperature`` on o4-mini), so silently
+           dropping is more ergonomic than failing every call. Users who want
+           strict validation here should query
+           :func:`arcllm.capabilities.get_model_capabilities` themselves.
 
         Args:
-            drop_params: If True, silently drop unsupported params
-            **kwargs: All parameters passed to the request
+            model: Model id (without provider prefix). Used to look up
+                capabilities; if unknown, the model-level filter is a no-op.
+            drop_params: Strict mode toggle for the adapter-level filter.
+            **kwargs: Inbound request kwargs.
 
         Returns:
-            Filtered kwargs dict
+            Filtered kwargs dict, ready for ``build_request`` to translate.
 
         Raises:
-            UnsupportedParameterError: If drop_params=False and unsupported params
+            UnsupportedParameterError: If ``drop_params=False`` and the
+                adapter doesn't accept one of the kwargs.
         """
-        # Always include these core params
         core_params = {"model", "messages", "stream"}
-        unsupported = set(kwargs.keys()) - self.supported_params - core_params
 
+        # Stage 1: adapter-level
+        unsupported = set(kwargs.keys()) - self.supported_params - core_params
         if unsupported:
             if drop_params:
-                # Remove unsupported params
-                return {k: v for k, v in kwargs.items() if k in self.supported_params}
-            raise UnsupportedParameterError(
-                f"Unsupported parameters for {self.provider_name}: {sorted(unsupported)}",
-                provider=self.provider_name,
-                unsupported_params=list(unsupported),
-            )
+                kwargs = {
+                    k: v
+                    for k, v in kwargs.items()
+                    if k in self.supported_params or k in core_params
+                }
+            else:
+                raise UnsupportedParameterError(
+                    f"Unsupported parameters for {self.provider_name}: {sorted(unsupported)}",
+                    provider=self.provider_name,
+                    unsupported_params=list(unsupported),
+                )
+
+        # Stage 2: per-model capability filter (always drop+warn).
+        kwargs = self._drop_by_capabilities(model, kwargs)
+        return kwargs
+
+    @staticmethod
+    def _drop_by_capabilities(model: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Drop params the model is known not to accept, with a warning.
+
+        Reasoning models (o-series, GPT-5, Claude with thinking, Gemini 2.5+
+        with thinking) reject ``temperature``/``top_p``. Some providers reject
+        ``stop`` for certain models. Embedding models reject everything.
+
+        Unknown models (not in the capability table) get no filtering — we
+        trust the user knows what they're doing.
+        """
+        # Lazy import to avoid circular dependency at module load.
+        from arcllm.capabilities.tables import (
+            DEFAULT_CAPABILITIES,
+            get_model_capabilities,
+        )
+
+        caps = get_model_capabilities(model)
+        if caps is DEFAULT_CAPABILITIES:
+            return kwargs  # unknown model — don't second-guess the user
+
+        dropped: list[tuple[str, str]] = []
+
+        if not caps.supports_temperature:
+            for k in ("temperature", "top_p"):
+                if k in kwargs and kwargs[k] is not None:
+                    dropped.append((k, "model does not accept temperature/top_p"))
+                    kwargs.pop(k, None)
+
+        if not caps.supports_stop_sequences:
+            for k in ("stop", "stop_sequences"):
+                if k in kwargs and kwargs[k] is not None:
+                    dropped.append((k, "model does not accept stop sequences"))
+                    kwargs.pop(k, None)
+
+        if not caps.supports_reasoning_effort and "reasoning_effort" in kwargs:
+            if kwargs["reasoning_effort"] is not None:
+                dropped.append(("reasoning_effort", "model does not support reasoning_effort"))
+            kwargs.pop("reasoning_effort", None)
+
+        if dropped:
+            import warnings
+
+            for param, reason in dropped:
+                warnings.warn(
+                    f"arcllm: dropped {param!r} for model {model!r} ({reason})",
+                    UserWarning,
+                    stacklevel=4,
+                )
         return kwargs
 
     def _get_api_key(self, env_var: str, param_key: str = "api_key") -> str:
@@ -376,10 +522,6 @@ class BaseAdapter(ABC):
         if self._cached_headers is None:
             self._cached_headers = self._build_headers()
         return self._cached_headers
-
-    def _invalidate_header_cache(self) -> None:
-        """Invalidate cached headers (e.g., if API key changes)."""
-        self._cached_headers = None
 
     @abstractmethod
     def build_request(
@@ -431,6 +573,91 @@ class BaseAdapter(ABC):
         """Parse embedding response - override in subclass if supported."""
         raise UnsupportedModelError(
             f"Embeddings not supported by {self.provider_name}",
+            provider=self.provider_name,
+        )
+
+    # ------------------------------------------------------------------
+    # Image generation surface (override in subclass when supported)
+    # ------------------------------------------------------------------
+
+    def build_image_generation_request(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build an image-generation request — override in providers that ship one.
+
+        Defaults to raising :class:`UnsupportedModelError` so callers see a
+        clean error rather than a silent provider 404.
+        """
+        raise UnsupportedModelError(
+            f"Image generation not supported by {self.provider_name}",
+            provider=self.provider_name,
+        )
+
+    def build_image_variation_request(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build an image-variation request (override when supported)."""
+        raise UnsupportedModelError(
+            f"Image variations not supported by {self.provider_name}",
+            provider=self.provider_name,
+        )
+
+    def build_image_edit_request(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        prompt: str,
+        mask: bytes | str | None = None,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build an image-edit request (override when supported)."""
+        raise UnsupportedModelError(
+            f"Image edits not supported by {self.provider_name}",
+            provider=self.provider_name,
+        )
+
+    def parse_image_response(self, data: bytes, model: str) -> ImageResponse:
+        """Parse an image-generation/variation/edit response.
+
+        Override in providers that ship image APIs. The response shape is
+        OpenAI-compatible: ``{"created": int, "data": [{url|b64_json}]}``.
+        """
+        raise UnsupportedModelError(
+            f"Image responses not supported by {self.provider_name}",
+            provider=self.provider_name,
+        )
+
+    # ------------------------------------------------------------------
+    # Rerank surface (override in subclass when supported)
+    # ------------------------------------------------------------------
+
+    def build_rerank_request(
+        self,
+        *,
+        model: str,
+        query: str,
+        documents: list[str],
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build a rerank request (override when supported)."""
+        raise UnsupportedModelError(
+            f"Reranking not supported by {self.provider_name}",
+            provider=self.provider_name,
+        )
+
+    def parse_rerank_response(self, data: bytes, model: str) -> RerankResponse:
+        """Parse a rerank response (override when supported)."""
+        raise UnsupportedModelError(
+            f"Reranking not supported by {self.provider_name}",
             provider=self.provider_name,
         )
 
@@ -487,6 +714,19 @@ _PROVIDER_MODULES: dict[str, tuple[str, str]] = {
     "perplexity": ("arcllm.providers.perplexity_adapter", "PerplexityAdapter"),
     "databricks": ("arcllm.providers.databricks_adapter", "DatabricksAdapter"),
     "ollama": ("arcllm.providers.ollama_adapter", "OllamaAdapter"),
+    # Tier A — OpenAI-compat thin wrappers (0.4.0)
+    "xai": ("arcllm.providers.xai_adapter", "XAIAdapter"),
+    "openrouter": ("arcllm.providers.openrouter_adapter", "OpenRouterAdapter"),
+    "nvidia_nim": ("arcllm.providers.nvidia_nim_adapter", "NvidiaNIMAdapter"),
+    "cerebras": ("arcllm.providers.cerebras_adapter", "CerebrasAdapter"),
+    "sambanova": ("arcllm.providers.sambanova_adapter", "SambaNovaAdapter"),
+    "deepinfra": ("arcllm.providers.deepinfra_adapter", "DeepInfraAdapter"),
+    # Tier B — bespoke / aliased adapters (0.4.0)
+    "huggingface": ("arcllm.providers.huggingface_adapter", "HuggingFaceAdapter"),
+    "watsonx": ("arcllm.providers.watsonx_adapter", "WatsonXAdapter"),
+    "ai21": ("arcllm.providers.ai21_adapter", "AI21Adapter"),
+    "azure_ai": ("arcllm.providers.azure_adapter", "AzureOpenAIAdapter"),
+    "custom": ("arcllm.providers.custom_adapter", "CustomAdapter"),
 }
 
 
@@ -616,6 +856,51 @@ def register_all_providers() -> None:
         from arcllm.providers import ollama_adapter
 
         register_provider("ollama", ollama_adapter.OllamaAdapter)
+    except ImportError:
+        pass
+
+    # Tier A — OpenAI-compatible thin wrappers (xAI, OpenRouter, NVIDIA NIM,
+    # Cerebras, SambaNova, Anyscale, DeepInfra). These all subclass
+    # OpenAIAdapter and only swap the base URL + auth env var.
+    try:
+        from arcllm.providers import xai_adapter
+
+        register_provider("xai", xai_adapter.XAIAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import openrouter_adapter
+
+        register_provider("openrouter", openrouter_adapter.OpenRouterAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import nvidia_nim_adapter
+
+        register_provider("nvidia_nim", nvidia_nim_adapter.NvidiaNIMAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import cerebras_adapter
+
+        register_provider("cerebras", cerebras_adapter.CerebrasAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import sambanova_adapter
+
+        register_provider("sambanova", sambanova_adapter.SambaNovaAdapter)
+    except ImportError:
+        pass
+
+    try:
+        from arcllm.providers import deepinfra_adapter
+
+        register_provider("deepinfra", deepinfra_adapter.DeepInfraAdapter)
     except ImportError:
         pass
 

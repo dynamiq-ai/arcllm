@@ -38,7 +38,6 @@ import pytest
 
 from tests.integration.base import IntegrationTestBase
 
-
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -238,9 +237,7 @@ class TestGroqIntegration(IntegrationTestBase):
                     "description": "Get the current weather in a location",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "location": {"type": "string", "description": "City name"}
-                        },
+                        "properties": {"location": {"type": "string", "description": "City name"}},
                         "required": ["location"],
                     },
                 },
@@ -284,9 +281,7 @@ class TestGroqIntegration(IntegrationTestBase):
                     "description": "Get current weather for a city",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "city": {"type": "string", "description": "The city name"}
-                        },
+                        "properties": {"city": {"type": "string", "description": "The city name"}},
                         "required": ["city"],
                     },
                 },
@@ -298,9 +293,7 @@ class TestGroqIntegration(IntegrationTestBase):
                     "description": "Get current time for a timezone",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "timezone": {"type": "string", "description": "Timezone"}
-                        },
+                        "properties": {"timezone": {"type": "string", "description": "Timezone"}},
                         "required": ["timezone"],
                     },
                 },

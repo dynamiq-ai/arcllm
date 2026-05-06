@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arcllm"
-version = "0.1.0"
-description = "The arc connecting you to every LLM. Zero dependencies, maximum performance."
+version = "0.4.0"
+description = "The arc connecting you to every LLM. Minimal dependencies, maximum performance."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 authors = [
-    { name = "ArcLLM Contributors" }
+    { name = "Dynamiq AI" }
 ]
 keywords = ["llm", "openai", "anthropic", "gemini", "claude", "gpt", "ai", "api", "gateway", "unified", "multi-provider"]
 classifiers = [
@@ -27,35 +27,44 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# Minimal runtime dependencies for maximum performance
+# Pinned-floor runtime dependencies. Adding a new one requires an issue + review.
 dependencies = [
-    "httpx[http2]>=0.27.0",  # Sync HTTP client with connection pooling & HTTP/2
-    "aiohttp>=3.10.0",       # Async HTTP client - faster than httpx for async
-    "msgspec>=0.18.0",       # Fast structs & JSON (2.7x faster object creation)
-    "orjson>=3.10.0",        # Fast JSON for request bodies
+    "httpx[http2]>=0.28.0",  # Sync HTTP client with connection pooling + HTTP/2
+    "aiohttp>=3.13.0",       # Async HTTP client (faster than httpx for async)
+    "msgspec>=0.21.0",       # Fast Struct types + JSON
+    "orjson>=3.11.0",        # Fast JSON for request bodies
 ]
 
 [project.optional-dependencies]
-# Performance extras (optional)
-performance = [
-    "uvloop>=0.19.0; sys_platform != 'win32'",  # Faster event loop (Unix only)
+# `arcllm[tokenize]` — tiktoken-backed token_counter for OpenAI-family
+# models. Without it, token_counter falls back to a chars/4 heuristic with a
+# one-time warning. Kept optional so the runtime tree stays at 4 deps.
+tokenize = [
+    "tiktoken>=0.7.0",
 ]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0.0",
-    "pytest-timeout>=2.3.0",
-    "ruff>=0.8.0",
-    "mypy>=1.13.0",
-    "pyright>=1.1.390",
-    "coverage>=7.6.0",
+    # Test runners
+    "pytest>=9.0.0",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "coverage>=7.13.0",
+    # Lint / type-check
+    "ruff>=0.15.0",
+    "mypy>=1.20.0",
+    "pyright>=1.1.409",
+    # Optional perf event-loop (Unix only) — bundled into dev so contributors run benchmarks under it
+    "uvloop>=0.22.0; sys_platform != 'win32'",
+    # Pull tiktoken into the dev env so the test_tokens.py suite covers the
+    # accurate-counting path locally.
+    "tiktoken>=0.7.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/arcllm/arcllm"
-Documentation = "https://github.com/arcllm/arcllm#readme"
-Repository = "https://github.com/arcllm/arcllm"
-Issues = "https://github.com/arcllm/arcllm/issues"
+Homepage = "https://github.com/dynamiq-ai/arcllm"
+Documentation = "https://github.com/dynamiq-ai/arcllm#readme"
+Repository = "https://github.com/dynamiq-ai/arcllm"
+Issues = "https://github.com/dynamiq-ai/arcllm/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["arcllm"]
@@ -118,6 +127,14 @@ ignore = [
     "ANN",     # Don't require annotations in benchmarks
     "T20",     # Print OK in benchmarks
     "PLR",     # Complexity OK in benchmarks
+    "PLW1510", # subprocess.run without check= — benchmarks inspect returncode manually
+    "PTH",     # open() vs Path.open() — minor stylistic, not worth churn here
+]
+"scripts/*" = [
+    "ANN",     # Don't require annotations in scripts
+    "T20",     # Print OK in CLI scripts
+    "PLR",     # Complexity OK in code-gen scripts
+    "SIM108",  # Ternary not always clearer in generators
 ]
 
 [tool.ruff.lint.isort]
@@ -151,9 +168,14 @@ markers = [
     "integration: All integration tests requiring live API keys",
     "openai: OpenAI-specific tests",
     "anthropic: Anthropic-specific tests",
+    "gemini: Google Gemini-specific tests",
     "groq: Groq-specific tests",
     "together_ai: Together AI-specific tests",
+    "fireworks_ai: Fireworks AI-specific tests",
     "mistral: Mistral-specific tests",
+    "perplexity: Perplexity-specific tests",
+    "cohere: Cohere-specific tests",
+    "deepseek: DeepSeek-specific tests",
 ]
 
 [tool.coverage.run]

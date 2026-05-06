@@ -50,16 +50,17 @@ class TestCapabilitiesTables:
         assert caps.supports_structured_output is True
 
     def test_anthropic_claude_capabilities(self):
-        """Test Claude has correct capabilities."""
-        caps = ANTHROPIC_CAPABILITIES["claude-3-5-sonnet-20241022"]
+        """Test current Claude flagship has correct capabilities."""
+        caps = ANTHROPIC_CAPABILITIES["claude-sonnet-4-5-20250929"]
         assert caps.supports_vision is True
         assert caps.supports_pdf_input is True
         assert caps.supports_tools is True
 
     def test_gemini_long_context(self):
-        """Test Gemini has long context window."""
-        caps = GEMINI_CAPABILITIES["gemini-1.5-pro"]
-        assert caps.context_window == 2097152  # 2M tokens
+        """Test Gemini flagship has long context window."""
+        caps = GEMINI_CAPABILITIES["gemini-2.5-pro"]
+        assert caps.context_window is not None
+        assert caps.context_window >= 1_000_000  # at least 1M tokens
 
     def test_groq_llama_capabilities(self):
         """Test Groq Llama has correct capabilities."""
@@ -69,9 +70,9 @@ class TestCapabilitiesTables:
 
     def test_all_capabilities_structure(self):
         """Test ALL_CAPABILITIES has proper structure."""
-        for _provider, caps in ALL_CAPABILITIES.items():
+        for caps in ALL_CAPABILITIES.values():
             assert isinstance(caps, dict)
-            for _model, model_caps in caps.items():
+            for model_caps in caps.values():
                 assert isinstance(model_caps, ModelCapabilities)
 
 
@@ -102,3 +103,70 @@ class TestModelCapabilitiesDataclass:
         assert caps.supports_pdf_input is False
         assert caps.supports_tools is False
         assert caps.supports_structured_output is False
+
+
+class TestGetModelInfo:
+    """``get_model_info`` is a litellm-compat snapshot of caps + pricing."""
+
+    def test_known_model_returns_full_payload(self):
+        from arcllm.capabilities import get_model_info
+
+        info = get_model_info("gpt-4o-mini")
+        assert info["max_tokens"] == 16384
+        assert info["max_input_tokens"] == 128000
+        assert info["max_output_tokens"] == 16384
+        assert info["supports_function_calling"] is True
+        assert info["supports_response_schema"] is True
+        assert info["kind"] == "chat"
+        # Pricing is converted from per-million to per-token.
+        assert info["input_cost_per_token"] is not None
+        assert info["output_cost_per_token"] is not None
+        # Cache fields are populated when the model has cached pricing.
+        if info["cache_read_input_token_cost"] is not None:
+            assert info["cache_read_input_token_cost"] > 0
+
+    def test_unknown_model_returns_defaults(self):
+        from arcllm.capabilities import get_model_info
+
+        info = get_model_info("totally-fake-model-xyz")
+        # Default capabilities are mostly Falsy; pricing fields are None.
+        assert info["supports_function_calling"] is False
+        assert info["input_cost_per_token"] is None
+        assert info["output_cost_per_token"] is None
+
+
+class TestSupportsFunctionCallingAlias:
+    def test_alias_matches_supports_tools(self):
+        from arcllm.capabilities import supports_function_calling, supports_tools
+
+        for model in ("gpt-4o", "claude-sonnet-4-5-20250929", "gemini-2.5-pro"):
+            assert supports_function_calling(model) == supports_tools(model)
+
+
+class TestGetSupportedOpenAIParams:
+    def test_chat_model_has_temperature_and_response_format(self):
+        from arcllm.capabilities import get_supported_openai_params
+
+        params = get_supported_openai_params("gpt-4o-mini")
+        assert "temperature" in params
+        assert "top_p" in params
+        assert "tools" in params
+        assert "response_format" in params
+        # GPT-4o-mini is not a reasoning model, so reasoning_effort isn't listed.
+        assert "reasoning_effort" not in params
+
+    def test_reasoning_model_drops_temperature_and_lists_reasoning_effort(self):
+        from arcllm.capabilities import get_supported_openai_params
+
+        params = get_supported_openai_params("o4-mini")
+        assert "temperature" not in params
+        assert "top_p" not in params
+        assert "reasoning_effort" in params
+
+    def test_anthropic_drops_response_format(self):
+        from arcllm.capabilities import get_supported_openai_params
+
+        # Anthropic does not implement OpenAI-style response_format.
+        params = get_supported_openai_params("claude-sonnet-4-5-20250929")
+        assert "response_format" not in params
+        assert "tools" in params  # tools are still supported

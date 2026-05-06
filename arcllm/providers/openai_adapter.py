@@ -48,18 +48,21 @@ Last Updated: 2026-01-08
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import orjson
 
 from arcllm.exceptions import (
     ArcLLMError,
     AuthenticationError,
+    BudgetExceededError,
     ContentFilterError,
+    InternalServerError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
     ResponseParseError,
+    ServiceUnavailableError,
     UnsupportedModelError,
 )
 from arcllm.providers.base import (
@@ -77,6 +80,8 @@ from arcllm.types import (
     EmbeddingResponse,
     EmbeddingUsage,
     FunctionCall,
+    ImageData,
+    ImageResponse,
     Message,
     ModelResponse,
     StreamChunk,
@@ -134,7 +139,7 @@ class OpenAIAdapter(BaseAdapter):
     ) -> RequestData:
         """Build OpenAI chat completion request."""
         # Check params
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         # Build request body
         body: dict[str, Any] = {
@@ -149,11 +154,13 @@ class OpenAIAdapter(BaseAdapter):
             if stream_options:
                 body["stream_options"] = stream_options
 
-        # Handle max_tokens vs max_completion_tokens for newer models
-        # o1, o3, gpt-5, gpt-4.1 models use max_completion_tokens instead of max_tokens
+        # Handle max_tokens vs max_completion_tokens for newer models.
+        # Reasoning models (o1/o3/o4) and the GPT-5 + GPT-4.1 families all use
+        # ``max_completion_tokens`` instead of the legacy ``max_tokens`` field.
         uses_completion_tokens = (
             model.startswith("o1")
             or model.startswith("o3")
+            or model.startswith("o4")
             or model.startswith("gpt-5")
             or model.startswith("gpt-4.1")
         )
@@ -382,53 +389,48 @@ class OpenAIAdapter(BaseAdapter):
             error_code = ""
 
         # Map to appropriate exception
+        common_kwargs: dict[str, Any] = {
+            "provider": self.provider_name,
+            "status_code": status_code,
+            "request_id": request_id,
+        }
+        message_lower = (message or "").lower()
+
         if status_code == 401:
-            return AuthenticationError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return AuthenticationError(message, **common_kwargs)
+        if status_code == 402:
+            return BudgetExceededError(message, **common_kwargs)
         if status_code == 429:
-            return RateLimitError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            # OpenAI uses 429 for both rate limits and quota exhaustion;
+            # disambiguate via the message body so callers can branch.
+            if any(
+                token in message_lower
+                for token in ("quota", "billing", "credit", "budget", "insufficient")
+            ):
+                return BudgetExceededError(message, **common_kwargs)
+            return RateLimitError(message, **common_kwargs)
         if status_code == 400:
             # error_code can be string or int depending on provider
             error_code_str = str(error_code) if error_code is not None else ""
             error_code_lower = error_code_str.lower()
-            message_lower = (message or "").lower()
             if "content_filter" in error_code_lower or "content_policy" in message_lower:
                 return ContentFilterError(
                     message,
-                    provider=self.provider_name,
-                    status_code=status_code,
-                    request_id=request_id,
                     filter_reason=error_code,
+                    **common_kwargs,
                 )
-            return InvalidRequestError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return InvalidRequestError(message, **common_kwargs)
         if status_code == 404:
-            return UnsupportedModelError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return UnsupportedModelError(message, **common_kwargs)
+        if status_code == 503:
+            return ServiceUnavailableError(message, **common_kwargs)
+        if status_code >= 500:
+            return InternalServerError(message, **common_kwargs)
         return ProviderAPIError(
             message,
-            provider=self.provider_name,
-            status_code=status_code,
-            request_id=request_id,
             error_type=error_type,
             error_code=error_code,
+            **common_kwargs,
         )
 
     def build_embedding_request(
@@ -495,6 +497,180 @@ class OpenAIAdapter(BaseAdapter):
             data=embeddings,
             usage=usage,
             object=resp.get("object", "list"),
+        )
+
+    # ------------------------------------------------------------------
+    # Image generation surface
+    # ------------------------------------------------------------------
+
+    def build_image_generation_request(
+        self,
+        *,
+        model: str,
+        prompt: str,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build a request for ``POST /v1/images/generations``.
+
+        Body matches OpenAI's spec verbatim — DALL-E 2/3 and gpt-image-1 all
+        accept the same ``{model, prompt, n, size, quality, style,
+        response_format, user}`` shape.
+        """
+        body: dict[str, Any] = {"model": model, "prompt": prompt}
+        for key in ("n", "size", "quality", "style", "response_format", "user", "background"):
+            if key in kwargs and kwargs[key] is not None:
+                body[key] = kwargs[key]
+        url = f"{self._api_base}/images/generations"
+        return RequestData(
+            method="POST",
+            url=url,
+            headers=self._get_headers(),
+            body=orjson.dumps(body),
+            timeout=self.config.timeout,
+        )
+
+    def build_image_variation_request(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build a multipart ``POST /v1/images/variations`` request."""
+        body, headers = self._build_image_multipart(
+            model=model,
+            image=image,
+            extras={
+                k: kwargs[k]
+                for k in ("n", "size", "response_format", "user")
+                if k in kwargs and kwargs[k] is not None
+            },
+        )
+        url = f"{self._api_base}/images/variations"
+        return RequestData(
+            method="POST",
+            url=url,
+            headers=headers,
+            body=body,
+            timeout=self.config.timeout,
+        )
+
+    def build_image_edit_request(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        prompt: str,
+        mask: bytes | str | None = None,
+        **kwargs: Any,
+    ) -> RequestData:
+        """Build a multipart ``POST /v1/images/edits`` request."""
+        body, headers = self._build_image_multipart(
+            model=model,
+            image=image,
+            mask=mask,
+            extras={
+                "prompt": prompt,
+                **{
+                    k: kwargs[k]
+                    for k in ("n", "size", "response_format", "user", "quality")
+                    if k in kwargs and kwargs[k] is not None
+                },
+            },
+        )
+        url = f"{self._api_base}/images/edits"
+        return RequestData(
+            method="POST",
+            url=url,
+            headers=headers,
+            body=body,
+            timeout=self.config.timeout,
+        )
+
+    def _build_image_multipart(
+        self,
+        *,
+        model: str,
+        image: bytes | str,
+        mask: bytes | str | None = None,
+        extras: dict[str, Any] | None = None,
+    ) -> tuple[bytes, dict[str, str]]:
+        """Compose a multipart body for the variation / edit endpoints."""
+        import secrets
+        from io import BytesIO
+
+        boundary = f"arcllm{secrets.token_hex(16)}"
+        buf = BytesIO()
+
+        def _write_field(name: str, value: str) -> None:
+            buf.write(f"--{boundary}\r\n".encode())
+            buf.write(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+            buf.write(value.encode("utf-8"))
+            buf.write(b"\r\n")
+
+        def _write_file(name: str, filename: str, data: bytes) -> None:
+            buf.write(f"--{boundary}\r\n".encode())
+            buf.write(
+                (
+                    f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                ).encode()
+            )
+            buf.write(b"Content-Type: application/octet-stream\r\n\r\n")
+            buf.write(data)
+            buf.write(b"\r\n")
+
+        _write_field("model", model)
+        for k, v in (extras or {}).items():
+            _write_field(k, str(v))
+
+        if isinstance(image, str):
+            with open(image, "rb") as f:  # noqa: PTH123 — multipart wants raw bytes
+                _write_file("image", "image.png", f.read())
+        else:
+            _write_file("image", "image.png", image)
+
+        if mask is not None:
+            if isinstance(mask, str):
+                with open(mask, "rb") as f:  # noqa: PTH123
+                    _write_file("mask", "mask.png", f.read())
+            else:
+                _write_file("mask", "mask.png", mask)
+
+        buf.write(f"--{boundary}--\r\n".encode())
+
+        headers = self._get_headers().copy()
+        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        # Drop the cached JSON content-type — multipart needs its own.
+        return buf.getvalue(), headers
+
+    def parse_image_response(self, data: bytes, model: str) -> ImageResponse:
+        """Parse an OpenAI images endpoint response."""
+        try:
+            resp = orjson.loads(data)
+        except (orjson.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ResponseParseError(
+                f"Failed to parse image response: {e}",
+                provider=self.provider_name,
+                raw_data=data,
+            ) from e
+
+        rows: list[ImageData] = []
+        raw_data: Any = resp.get("data") or []
+        for raw_item in raw_data:
+            if not isinstance(raw_item, dict):
+                continue
+            item = cast("dict[str, Any]", raw_item)
+            rows.append(
+                ImageData(
+                    url=item.get("url"),
+                    b64_json=item.get("b64_json"),
+                    revised_prompt=item.get("revised_prompt"),
+                )
+            )
+        return ImageResponse(
+            created=int(resp.get("created", 0)),
+            data=rows,
+            model=str(resp.get("model") or model),
         )
 
 

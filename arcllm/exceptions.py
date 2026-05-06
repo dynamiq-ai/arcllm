@@ -10,14 +10,19 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "APIConnectionError",
     "ArcLLMError",
     "AuthenticationError",
+    "BudgetExceededError",
     "ConnectionError",
     "ContentFilterError",
+    "InternalServerError",
     "InvalidRequestError",
     "ProviderAPIError",
     "RateLimitError",
     "ResponseParseError",
+    "ServiceUnavailableError",
+    "Timeout",
     "TimeoutError",
     "UnsupportedModelError",
     "UnsupportedParameterError",
@@ -249,15 +254,51 @@ class InvalidRequestError(ArcLLMError):
         self.param = param
 
 
+class BudgetExceededError(ProviderAPIError):
+    """Raised when the account has exhausted its quota or billing limit.
+
+    Distinct from :class:`RateLimitError` (which is recoverable by retrying
+    after a delay) — a budget exception requires human intervention. Maps
+    most commonly to HTTP 402 (Payment Required) and to provider-specific
+    quota-exceeded payloads on 429 / 403.
+    """
+
+
+class ServiceUnavailableError(ProviderAPIError):
+    """Raised when the provider returns 503 (or equivalent transient outage).
+
+    Often retryable but separate from rate limits — providers expose this
+    when a region / model variant is temporarily down.
+    """
+
+
+class InternalServerError(ProviderAPIError):
+    """Raised on 5xx responses other than 503.
+
+    Indicates a provider-side bug or partial outage. Usually retryable.
+    """
+
+
 def map_status_code_to_exception(
     status_code: int,
     message: str,
     **kwargs: Any,
 ) -> ArcLLMError:
-    """
-    Map HTTP status code to appropriate exception type.
+    """Map HTTP status code to the right :class:`ArcLLMError` subclass.
 
-    This is a helper for provider adapters to create consistent exceptions.
+    Provider adapters call this from ``parse_error`` so the error surface
+    stays consistent across providers. Distinguishes:
+
+    - 401/403 → :class:`AuthenticationError`
+    - 402 → :class:`BudgetExceededError` (some providers signal quota here)
+    - 404 → :class:`UnsupportedModelError`
+    - 408 → :class:`TimeoutError`
+    - 429 → :class:`RateLimitError` (or :class:`BudgetExceededError` if the
+      message obviously signals quota — providers like OpenAI, Anthropic,
+      and Bedrock mix these).
+    - 503 → :class:`ServiceUnavailableError`
+    - other 5xx → :class:`InternalServerError`
+    - 400 → :class:`InvalidRequestError`
     """
     if status_code == 401:
         return AuthenticationError(message, status_code=status_code, **kwargs)
@@ -265,7 +306,15 @@ def map_status_code_to_exception(
         return AuthenticationError(
             f"Permission denied: {message}", status_code=status_code, **kwargs
         )
+    if status_code == 402:
+        return BudgetExceededError(message, status_code=status_code, **kwargs)
     if status_code == 429:
+        # Some providers conflate quota exhaustion with rate limiting on 429.
+        # If the message clearly signals quota/billing, route to the more
+        # accurate exception; otherwise treat as a recoverable rate limit.
+        lowered = message.lower()
+        if any(token in lowered for token in ("quota", "billing", "credit", "budget")):
+            return BudgetExceededError(message, status_code=status_code, **kwargs)
         return RateLimitError(message, status_code=status_code, **kwargs)
     if status_code == 404:
         return UnsupportedModelError(message, status_code=status_code, **kwargs)
@@ -273,6 +322,16 @@ def map_status_code_to_exception(
         return InvalidRequestError(message, status_code=status_code, **kwargs)
     if status_code == 408:
         return TimeoutError(message, status_code=status_code, **kwargs)
+    if status_code == 503:
+        return ServiceUnavailableError(message, status_code=status_code, **kwargs)
     if status_code >= 500:
-        return ProviderAPIError(f"Server error: {message}", status_code=status_code, **kwargs)
+        return InternalServerError(f"Server error: {message}", status_code=status_code, **kwargs)
     return ProviderAPIError(message, status_code=status_code, **kwargs)
+
+
+# Litellm-compatibility aliases. Kept for downstream callers (notably
+# dynamiq) that import the legacy names from litellm.exceptions. These add
+# zero runtime overhead — they are simply alternative bindings to the same
+# class objects.
+Timeout = TimeoutError
+APIConnectionError = ConnectionError

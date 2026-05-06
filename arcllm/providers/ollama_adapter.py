@@ -14,8 +14,8 @@ import orjson
 
 from arcllm.exceptions import (
     ArcLLMError,
-    ProviderAPIError,
     ResponseParseError,
+    map_status_code_to_exception,
 )
 from arcllm.providers.base import (
     COMMON_PARAMS,
@@ -90,7 +90,7 @@ class OllamaAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> RequestData:
         """Build Ollama chat request using OpenAI-compatible endpoint."""
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         body: dict[str, Any] = {
             "model": model,
@@ -264,17 +264,22 @@ class OllamaAdapter(BaseAdapter):
         data: bytes,
         request_id: str | None = None,
     ) -> ArcLLMError:
-        """Parse Ollama error response."""
+        """Parse Ollama error response.
+
+        Ollama runs locally and typically only returns 4xx for malformed
+        requests; we delegate to the shared status-code mapper for
+        consistent exception classes.
+        """
         try:
             error_data = orjson.loads(data)
             message = error_data.get("error", "Unknown error")
         except (orjson.JSONDecodeError, UnicodeDecodeError):
             message = data.decode("utf-8", errors="replace")
 
-        return ProviderAPIError(
+        return map_status_code_to_exception(
+            status_code,
             message,
             provider=self.provider_name,
-            status_code=status_code,
             request_id=request_id,
         )
 

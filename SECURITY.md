@@ -63,20 +63,26 @@ When using arcllm:
 
 ### Dependency Security
 
-arcllm has **zero runtime dependencies** by design, which significantly reduces supply chain risk. For development dependencies, we:
+arcllm ships **four curated runtime dependencies** — `httpx[http2]`,
+`aiohttp`, `msgspec`, `orjson` — all chosen for their maturity and small
+attack surface. We don't accept new runtime deps without an approved issue
+and review.
 
-- Use pinned versions in `pyproject.toml`
-- Regularly update to patched versions
-- Review dependency changes in PRs
+For dependency hygiene we:
+
+- Pin minimum versions in `pyproject.toml`.
+- Regularly bump to patched releases.
+- Require a maintainer review on any dependency change in a PR.
 
 ## Security Features
 
 ### Built-in Protections
 
-1. **TLS/SSL**: All HTTPS connections use system CA certificates
-2. **No External Dependencies**: Zero runtime dependencies = smaller attack surface
-3. **Input Sanitization**: Request bodies are properly encoded
-4. **Connection Pooling**: Secure connection reuse with proper cleanup
+1. **TLS/SSL**: All HTTPS connections use system CA certificates with a
+   minimum of TLS 1.2.
+2. **Tightly curated dependency tree**: 4 runtime deps, audited.
+3. **Input sanitization**: request bodies serialised through `orjson`.
+4. **Connection pooling**: secure connection reuse with proper cleanup.
 
 ### What We Don't Do
 

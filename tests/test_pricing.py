@@ -31,14 +31,14 @@ class TestGetModelPricing:
 
     def test_get_anthropic_pricing(self):
         """Test getting Anthropic model pricing."""
-        pricing = get_model_pricing("claude-3-5-sonnet-20241022")
+        pricing = get_model_pricing("claude-sonnet-4-5-20250929")
         assert pricing.input_cost_per_million == 3.00
         assert pricing.output_cost_per_million == 15.00
         assert pricing.cached_input_cost_per_million == 0.30
 
     def test_get_gemini_pricing(self):
         """Test getting Gemini model pricing."""
-        pricing = get_model_pricing("gemini-1.5-pro")
+        pricing = get_model_pricing("gemini-2.5-pro")
         assert pricing.input_cost_per_million == 1.25
 
     def test_unknown_model_raises_error(self):
@@ -71,9 +71,9 @@ class TestCostPerToken:
         assert pytest.approx(completion_cost, abs=1e-6) == 0.0003
 
     def test_calculate_cost_claude(self):
-        """Test cost calculation for Claude."""
+        """Test cost calculation for current Claude Sonnet 4.5."""
         prompt_cost, completion_cost = cost_per_token(
-            "claude-3-5-sonnet-20241022", prompt_tokens=1000000, completion_tokens=1000000
+            "claude-sonnet-4-5-20250929", prompt_tokens=1000000, completion_tokens=1000000
         )
         # Input: 3.00/1M * 1M = 3.00
         # Output: 15.00/1M * 1M = 15.00
@@ -167,16 +167,18 @@ class TestPricingCoverage:
     @pytest.mark.parametrize(
         "model",
         [
+            "gpt-5",
+            "gpt-5-mini",
+            "gpt-5.4",
+            "gpt-5.4-mini",
             "gpt-4o",
             "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-3.5-turbo",
-            "o1",
-            "o1-mini",
+            "o3",
+            "o4-mini",
         ],
     )
     def test_openai_models_have_pricing(self, model):
-        """Test OpenAI models have pricing."""
+        """Test current OpenAI GA models have pricing."""
         pricing = get_model_pricing(model)
         assert pricing.input_cost_per_million >= 0
         assert pricing.output_cost_per_million >= 0
@@ -184,25 +186,26 @@ class TestPricingCoverage:
     @pytest.mark.parametrize(
         "model",
         [
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229",
+            "claude-sonnet-4-5-20250929",
+            "claude-haiku-4-5-20251001",
+            "claude-opus-4-5-20251101",
         ],
     )
     def test_anthropic_models_have_pricing(self, model):
-        """Test Anthropic models have pricing."""
+        """Test current Anthropic GA models have pricing."""
         pricing = get_model_pricing(model)
         assert pricing.input_cost_per_million >= 0
 
     @pytest.mark.parametrize(
         "model",
         [
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
         ],
     )
     def test_gemini_models_have_pricing(self, model):
-        """Test Gemini models have pricing."""
+        """Test current Gemini GA models have pricing."""
         pricing = get_model_pricing(model)
         assert pricing.input_cost_per_million >= 0
 

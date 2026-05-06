@@ -11,17 +11,20 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from typing import Any, cast
 
 import orjson
 
 from arcllm.exceptions import (
     ArcLLMError,
     AuthenticationError,
+    BudgetExceededError,
+    InternalServerError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
     ResponseParseError,
+    ServiceUnavailableError,
     UnsupportedModelError,
 )
 from arcllm.providers.base import (
@@ -35,6 +38,7 @@ from arcllm.types import (
     Choice,
     ChunkChoice,
     ChunkDelta,
+    Citation,
     EmbeddingData,
     EmbeddingResponse,
     EmbeddingUsage,
@@ -47,6 +51,103 @@ from arcllm.types import (
 )
 
 __all__ = ["GeminiAdapter"]
+
+
+_GEMINI_NATIVE_TOOL_KEYS = frozenset(
+    {
+        "google_search",
+        "google_search_retrieval",
+        "code_execution",
+        "url_context",
+        "google_maps",
+    }
+)
+
+
+def _is_gemini_native_tool(tool: dict[str, Any]) -> bool:
+    """True if ``tool`` is one of Gemini's built-in server-side tools.
+
+    Gemini takes these as ``{"<tool_name>": {}}`` entries inside the ``tools``
+    array (no ``type`` key, distinct from OpenAI's ``{"type": "function"}``
+    shape). We look for any key that matches a known native tool.
+    """
+    if "type" in tool:
+        return False  # OpenAI-style entry; not native to Gemini
+    return any(key in _GEMINI_NATIVE_TOOL_KEYS for key in tool)
+
+
+def _extract_grounding_citations(candidate: dict[str, Any]) -> list[Citation] | None:
+    """Pull Google Search grounding citations off a Gemini candidate.
+
+    Gemini's grounded responses (when called with the ``google_search`` tool
+    or older ``googleSearchRetrieval``) attach a ``groundingMetadata`` block
+    to each candidate:
+
+        {
+          "groundingMetadata": {
+            "groundingChunks": [{"web": {"uri": "...", "title": "..."}}, ...],
+            "groundingSupports": [
+              {
+                "segment": {"startIndex": 0, "endIndex": 42, "text": "..."},
+                "groundingChunkIndices": [0, 2]
+              },
+              ...
+            ]
+          }
+        }
+
+    We pair each chunk URL with the start/end indices from the *first*
+    grounding support that references it. Chunks without a support get the
+    URL/title alone (no offsets).
+    """
+    grounding_raw = candidate.get("groundingMetadata")
+    if not isinstance(grounding_raw, dict):
+        return None
+    grounding = cast("dict[str, Any]", grounding_raw)
+
+    chunks = cast("list[Any]", grounding.get("groundingChunks") or [])
+    if not chunks:
+        return None
+
+    supports = cast("list[Any]", grounding.get("groundingSupports") or [])
+
+    # Index → (start, end) for the first support that references it.
+    chunk_offsets: dict[int, tuple[int | None, int | None]] = {}
+    for sup in supports:
+        if not isinstance(sup, dict):
+            continue
+        sup_dict = cast("dict[str, Any]", sup)
+        seg = cast("dict[str, Any]", sup_dict.get("segment") or {})
+        indices = cast("list[Any]", sup_dict.get("groundingChunkIndices") or [])
+        for idx in indices:
+            if not isinstance(idx, int):
+                continue
+            if idx not in chunk_offsets:
+                chunk_offsets[idx] = (seg.get("startIndex"), seg.get("endIndex"))
+
+    citations: list[Citation] = []
+    for i, chunk in enumerate(chunks):
+        if not isinstance(chunk, dict):
+            continue
+        chunk_dict = cast("dict[str, Any]", chunk)
+        web = cast(
+            "dict[str, Any]",
+            chunk_dict.get("web") or chunk_dict.get("retrievedContext") or {},
+        )
+        url = web.get("uri") or web.get("url")
+        if not url:
+            continue
+        start, end = chunk_offsets.get(i, (None, None))
+        citations.append(
+            Citation(
+                url=str(url),
+                title=web.get("title"),
+                snippet=web.get("snippet"),
+                start_index=start,
+                end_index=end,
+            )
+        )
+    return citations or None
 
 
 class GeminiAdapter(BaseAdapter):
@@ -178,12 +279,24 @@ class GeminiAdapter(BaseAdapter):
         return parts
 
     def _convert_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert OpenAI tools to Gemini format."""
+        """Convert OpenAI tools to Gemini format.
+
+        Three cases:
+
+        1. ``{"type": "function", "function": {...}}`` -> entry inside the
+           single ``functionDeclarations`` block Gemini expects.
+        2. Gemini-native built-in tools — passed through verbatim:
+           ``{"google_search": {}}``, ``{"google_search_retrieval": {}}``,
+           ``{"code_execution": {}}``, ``{"url_context": {}}``,
+           ``{"google_maps": {}}``.
+        3. Anything else is dropped (preserving today's behaviour).
+        """
         function_declarations: list[dict[str, Any]] = []
+        passthrough_tools: list[dict[str, Any]] = []
 
         for tool in tools:
             if tool.get("type") == "function":
-                func = tool.get("function", {})
+                func = cast("dict[str, Any]", tool.get("function") or {})
                 function_declarations.append(
                     {
                         "name": func.get("name", ""),
@@ -191,8 +304,14 @@ class GeminiAdapter(BaseAdapter):
                         "parameters": func.get("parameters", {}),
                     }
                 )
+            elif _is_gemini_native_tool(tool):
+                passthrough_tools.append(tool)
 
-        return [{"functionDeclarations": function_declarations}]
+        out: list[dict[str, Any]] = []
+        if function_declarations:
+            out.append({"functionDeclarations": function_declarations})
+        out.extend(passthrough_tools)
+        return out
 
     def build_request(
         self,
@@ -204,7 +323,7 @@ class GeminiAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> RequestData:
         """Build Gemini generateContent request."""
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         system_instruction, contents = self._convert_messages(messages)
 
@@ -227,6 +346,16 @@ class GeminiAdapter(BaseAdapter):
             stop_val: str | list[str] = kwargs["stop"]
             stops: list[str] = stop_val if isinstance(stop_val, list) else [stop_val]
             generation_config["stopSequences"] = stops
+
+        # Thinking config (Gemini 2.5+ / 3.x extended thinking).
+        # https://ai.google.dev/gemini-api/docs/thinking
+        thinking_config: dict[str, Any] = {}
+        if "thinking_budget" in kwargs and kwargs["thinking_budget"] is not None:
+            thinking_config["thinkingBudget"] = int(kwargs["thinking_budget"])
+        if "include_thoughts" in kwargs and kwargs["include_thoughts"] is not None:
+            thinking_config["includeThoughts"] = bool(kwargs["include_thoughts"])
+        if thinking_config:
+            generation_config["thinkingConfig"] = thinking_config
 
         # Handle response_format for JSON mode
         if kwargs.get("response_format"):
@@ -310,10 +439,12 @@ class GeminiAdapter(BaseAdapter):
                     )
 
             text_content = "".join(text_parts) if text_parts else None
+            citations = _extract_grounding_citations(candidate)
             message = Message(
                 role="assistant",
                 content=text_content,
-                tool_calls=tool_calls if tool_calls else None,
+                tool_calls=tool_calls or None,
+                citations=citations,
             )
 
             # Map finish reason
@@ -398,7 +529,7 @@ class GeminiAdapter(BaseAdapter):
             text_content = "".join(text_parts) if text_parts else None
             delta = ChunkDelta(
                 content=text_content,
-                tool_calls=tool_call_deltas if tool_call_deltas else None,
+                tool_calls=tool_call_deltas or None,
             )
 
             finish_reason = None
@@ -451,40 +582,36 @@ class GeminiAdapter(BaseAdapter):
             message = data.decode("utf-8", errors="replace")
             error_status = ""
 
+        common_kwargs: dict[str, Any] = {
+            "provider": self.provider_name,
+            "status_code": status_code,
+            "request_id": request_id,
+        }
+        message_lower = (message or "").lower()
+
         if status_code in {401, 403}:
-            return AuthenticationError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return AuthenticationError(message, **common_kwargs)
+        if status_code == 402:
+            return BudgetExceededError(message, **common_kwargs)
         if status_code == 429:
-            return RateLimitError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            if any(
+                token in message_lower
+                for token in ("quota", "billing", "credit", "budget", "exhausted")
+            ):
+                return BudgetExceededError(message, **common_kwargs)
+            return RateLimitError(message, **common_kwargs)
         if status_code == 400:
-            return InvalidRequestError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return InvalidRequestError(message, **common_kwargs)
         if status_code == 404:
-            return UnsupportedModelError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return UnsupportedModelError(message, **common_kwargs)
+        if status_code == 503:
+            return ServiceUnavailableError(message, **common_kwargs)
+        if status_code >= 500:
+            return InternalServerError(message, **common_kwargs)
         return ProviderAPIError(
             message,
-            provider=self.provider_name,
-            status_code=status_code,
-            request_id=request_id,
             error_type=error_status,
+            **common_kwargs,
         )
 
     def build_embedding_request(

@@ -1,0 +1,69 @@
+name: Model drift check
+
+# Once a week, list every provider's currently-supported models via their
+# `/v1/models` endpoint and diff against `arcllm/pricing/tables.py`. If the
+# upstream catalog has new GA chat models or has dropped models we still
+# advertise, open an issue tagging maintainers.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'  # 04:00 UTC every Monday
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run drift detector
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+        id: drift
+        run: |
+          python scripts/check_model_drift.py | tee drift-report.md
+          # Set has_drift output if the report includes any "DRIFT" lines
+          if grep -q '^- DRIFT' drift-report.md; then
+            echo "has_drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report
+          path: drift-report.md
+
+      - name: Open / update tracking issue
+        if: steps.drift.outputs.has_drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Reuse a single rolling issue so we don't spam the tracker.
+          ISSUE_NUMBER=$(gh issue list --label model-drift --state open --json number -q '.[0].number')
+          if [[ -z "$ISSUE_NUMBER" ]]; then
+            gh issue create \
+              --title "Model catalog drift detected ($(date -u +%Y-%m-%d))" \
+              --label model-drift \
+              --body-file drift-report.md
+          else
+            gh issue comment "$ISSUE_NUMBER" --body-file drift-report.md
+          fi

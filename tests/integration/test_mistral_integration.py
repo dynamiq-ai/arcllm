@@ -168,9 +168,7 @@ class TestMistralIntegration(IntegrationTestBase):
                     "description": "Get the current weather in a location",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "location": {"type": "string", "description": "City name"}
-                        },
+                        "properties": {"location": {"type": "string", "description": "City name"}},
                         "required": ["location"],
                     },
                 },

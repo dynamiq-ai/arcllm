@@ -25,7 +25,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import gc
 import json
 import os
 import statistics
@@ -34,7 +33,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
 
 # Common request parameters for fair comparison
 BENCHMARK_SEED = 42
@@ -46,37 +44,38 @@ BENCHMARK_MESSAGE = "Count from 1 to 5."
 @dataclass
 class BenchmarkResult:
     """Result from a single benchmark run."""
+
     library: str
     metric: str
     values: list[float]
     unit: str
     errors: list[str] = field(default_factory=list)
     sample_responses: list[str] = field(default_factory=list)
-    
+
     @property
     def success_count(self) -> int:
         return len(self.values)
-    
+
     @property
     def error_count(self) -> int:
         return len(self.errors)
-    
+
     @property
     def mean(self) -> float:
         return statistics.mean(self.values) if self.values else 0
-    
+
     @property
     def median(self) -> float:
         return statistics.median(self.values) if self.values else 0
-    
+
     @property
     def stdev(self) -> float:
         return statistics.stdev(self.values) if len(self.values) > 1 else 0
-    
+
     @property
     def min(self) -> float:
         return min(self.values) if self.values else 0
-    
+
     @property
     def max(self) -> float:
         return max(self.values) if self.values else 0
@@ -84,14 +83,18 @@ class BenchmarkResult:
 
 def measure_import_time(library: str, use_uvloop: bool = False) -> float:
     """Measure import time for a library in isolated subprocess."""
-    uvloop_setup = """
+    uvloop_setup = (
+        """
 try:
     import uvloop
     uvloop.install()
 except ImportError:
     pass
-""" if use_uvloop else ""
-    
+"""
+        if use_uvloop
+        else ""
+    )
+
     script = f"""
 import time
 {uvloop_setup}
@@ -149,8 +152,9 @@ def run_arcllm_benchmark_isolated(
     concurrency: int = 5,
 ) -> dict[str, Any]:
     """Run arcllm benchmarks in isolated subprocess with uvloop."""
-    
-    uvloop_setup = """
+
+    uvloop_setup = (
+        """
 # Install uvloop for max performance
 try:
     import uvloop
@@ -158,8 +162,11 @@ try:
     UVLOOP_ENABLED = True
 except ImportError:
     UVLOOP_ENABLED = False
-""" if use_uvloop else "UVLOOP_ENABLED = False"
-    
+"""
+        if use_uvloop
+        else "UVLOOP_ENABLED = False"
+    )
+
     script = f'''
 import json
 import time
@@ -266,7 +273,7 @@ for i in range(iterations):
                     ttft = (time.perf_counter() - start) * 1000
                     ttft_values.append(ttft)
                     got_first_token = True
-        
+
         if not got_first_token:
             stream_errors.append("No content in stream")
         elif i < 3:
@@ -312,12 +319,12 @@ async def measure_concurrent():
             return elapsed if is_valid else None, None
         except Exception as e:
             return None, str(e)
-    
+
     # Run multiple batches
     batch_times = []
     all_latencies = []
     batch_errors = []
-    
+
     for _ in range(iterations):
         gc.collect()
         batch_start = time.perf_counter()
@@ -325,13 +332,13 @@ async def measure_concurrent():
         results_batch = await asyncio.gather(*tasks)
         batch_time = (time.perf_counter() - batch_start) * 1000
         batch_times.append(batch_time)
-        
+
         for latency, error in results_batch:
             if latency is not None:
                 all_latencies.append(latency)
             if error is not None:
                 batch_errors.append(error)
-    
+
     return batch_times, all_latencies, batch_errors
 
 batch_times, concurrent_latencies, concurrent_errors = asyncio.run(measure_concurrent())
@@ -340,17 +347,17 @@ results["concurrent_individual"] = {{"values": concurrent_latencies, "errors": [
 
 print(json.dumps(results))
 '''
-    
+
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         env=os.environ,
     )
-    
+
     if result.returncode != 0:
         raise RuntimeError(f"arcllm benchmark failed: {result.stderr}")
-    
+
     return json.loads(result.stdout.strip())
 
 
@@ -362,7 +369,7 @@ def run_litellm_benchmark_isolated(
     concurrency: int = 5,
 ) -> dict[str, Any]:
     """Run litellm benchmarks in isolated subprocess."""
-    
+
     script = f'''
 import json
 import time
@@ -469,7 +476,7 @@ for i in range(iterations):
                     ttft = (time.perf_counter() - start) * 1000
                     ttft_values.append(ttft)
                     got_first_token = True
-        
+
         if not got_first_token:
             stream_errors.append("No content in stream")
         elif i < 3:
@@ -515,11 +522,11 @@ async def measure_concurrent():
             return elapsed if is_valid else None, None
         except Exception as e:
             return None, str(e)
-    
+
     batch_times = []
     all_latencies = []
     batch_errors = []
-    
+
     for _ in range(iterations):
         gc.collect()
         batch_start = time.perf_counter()
@@ -527,13 +534,13 @@ async def measure_concurrent():
         results_batch = await asyncio.gather(*tasks)
         batch_time = (time.perf_counter() - batch_start) * 1000
         batch_times.append(batch_time)
-        
+
         for latency, error in results_batch:
             if latency is not None:
                 all_latencies.append(latency)
             if error is not None:
                 batch_errors.append(error)
-    
+
     return batch_times, all_latencies, batch_errors
 
 batch_times, concurrent_latencies, concurrent_errors = asyncio.run(measure_concurrent())
@@ -542,17 +549,17 @@ results["concurrent_individual"] = {{"values": concurrent_latencies, "errors": [
 
 print(json.dumps(results))
 '''
-    
+
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         env=os.environ,
     )
-    
+
     if result.returncode != 0:
         raise RuntimeError(f"litellm benchmark failed: {result.stderr}")
-    
+
     return json.loads(result.stdout.strip())
 
 
@@ -566,7 +573,7 @@ def print_comparison(
     concurrency: int,
 ) -> None:
     """Print a comparison table of results."""
-    
+
     def make_result(data: dict, key: str, lib: str) -> BenchmarkResult:
         d = data.get(key, {"values": [], "errors": [], "samples": []})
         return BenchmarkResult(
@@ -577,12 +584,12 @@ def print_comparison(
             errors=d.get("errors", []),
             sample_responses=d.get("samples", []),
         )
-    
+
     print()
     print("=" * 80)
     print("BENCHMARK RESULTS: arcllm vs litellm")
     print("=" * 80)
-    
+
     # Configuration
     uvloop_status = "✅ ENABLED" if arcllm_data.get("uvloop", False) else "❌ DISABLED"
     print()
@@ -594,7 +601,7 @@ def print_comparison(
     print(f"│ Message               │ {BENCHMARK_MESSAGE:<51} │")
     print(f"│ Seed                  │ {BENCHMARK_SEED:<51} │")
     print("└───────────────────────┴─────────────────────────────────────────────────────┘")
-    
+
     # Startup metrics
     print()
     print("┌─────────────────────────────────────────────────────────────────────────────┐")
@@ -602,19 +609,23 @@ def print_comparison(
     print("├───────────────────────┬──────────────┬──────────────┬────────────┬──────────┤")
     print("│ Metric                │ arcllm       │ litellm      │ Difference │ Winner   │")
     print("├───────────────────────┼──────────────┼──────────────┼────────────┼──────────┤")
-    
-    import_diff = litellm_import - arcllm_import
+
+    litellm_import - arcllm_import
     import_winner = "arcllm" if arcllm_import < litellm_import else "litellm"
     import_ratio = litellm_import / arcllm_import if arcllm_import > 0 else 0
-    print(f"│ Import Time           │ {arcllm_import:>8.1f} ms  │ {litellm_import:>8.1f} ms  │   {import_ratio:>5.1f}x   │ {import_winner:>8} │")
-    
-    memory_diff = litellm_memory - arcllm_memory
+    print(
+        f"│ Import Time           │ {arcllm_import:>8.1f} ms  │ {litellm_import:>8.1f} ms  │   {import_ratio:>5.1f}x   │ {import_winner:>8} │"
+    )
+
+    litellm_memory - arcllm_memory
     memory_winner = "arcllm" if arcllm_memory < litellm_memory else "litellm"
     memory_ratio = litellm_memory / arcllm_memory if arcllm_memory > 0 else 0
-    print(f"│ Memory Usage          │ {arcllm_memory:>8.1f} MB  │ {litellm_memory:>8.1f} MB  │   {memory_ratio:>5.1f}x   │ {memory_winner:>8} │")
-    
+    print(
+        f"│ Memory Usage          │ {arcllm_memory:>8.1f} MB  │ {litellm_memory:>8.1f} MB  │   {memory_ratio:>5.1f}x   │ {memory_winner:>8} │"
+    )
+
     print("└───────────────────────┴──────────────┴──────────────┴────────────┴──────────┘")
-    
+
     # Request metrics
     print()
     print("┌─────────────────────────────────────────────────────────────────────────────┐")
@@ -622,33 +633,35 @@ def print_comparison(
     print("├───────────────────────┬──────────────┬──────────────┬────────────┬──────────┤")
     print("│ Metric                │ arcllm       │ litellm      │ Difference │ Winner   │")
     print("├───────────────────────┼──────────────┼──────────────┼────────────┼──────────┤")
-    
+
     metrics = [
         ("Sync Completion", "sync_latency"),
         ("Streaming TTFT", "streaming_ttft"),
         ("Async Sequential", "async_latency"),
         (f"Concurrent ({concurrency}x)", "concurrent_batch_time"),
     ]
-    
+
     for name, key in metrics:
         arc = make_result(arcllm_data, key, "arcllm")
         lit = make_result(litellm_data, key, "litellm")
-        
+
         if arc.values and lit.values:
             diff = lit.median - arc.median
             winner = "arcllm" if arc.median < lit.median else "litellm"
-            print(f"│ {name:<21} │ {arc.median:>8.1f} ms  │ {lit.median:>8.1f} ms  │ {diff:>+8.1f} ms │ {winner:>8} │")
+            print(
+                f"│ {name:<21} │ {arc.median:>8.1f} ms  │ {lit.median:>8.1f} ms  │ {diff:>+8.1f} ms │ {winner:>8} │"
+            )
         else:
             print(f"│ {name:<21} │ {'N/A':>11}  │ {'N/A':>11}  │ {'N/A':>10} │ {'N/A':>8} │")
-    
+
     print("└───────────────────────┴──────────────┴──────────────┴────────────┴──────────┘")
-    
+
     # Sample responses
     print()
     print("┌─────────────────────────────────────────────────────────────────────────────┐")
     print("│ SAMPLE RESPONSES                                                            │")
     print("├───────────────────────┬─────────────────────────────────────────────────────┤")
-    
+
     arc_sync = make_result(arcllm_data, "sync_latency", "arcllm")
     lit_sync = make_result(litellm_data, "sync_latency", "litellm")
     arc_sample = arc_sync.sample_responses[0][:50] if arc_sync.sample_responses else "(no response)"
@@ -656,16 +669,16 @@ def print_comparison(
     print(f"│ arcllm                │ {arc_sample:<51} │")
     print(f"│ litellm               │ {lit_sample:<51} │")
     print("└───────────────────────┴─────────────────────────────────────────────────────┘")
-    
+
     # Summary
     print()
     print("=" * 80)
     print("SUMMARY")
     print("=" * 80)
-    
+
     print(f"  Import time:     arcllm is {import_ratio:.1f}x faster")
     print(f"  Memory usage:    arcllm uses {memory_ratio:.1f}x less memory")
-    
+
     arc_sync = make_result(arcllm_data, "sync_latency", "arcllm")
     lit_sync = make_result(litellm_data, "sync_latency", "litellm")
     if arc_sync.values and lit_sync.values:
@@ -674,7 +687,7 @@ def print_comparison(
             print(f"  Sync requests:   arcllm is {sync_diff:.1f}ms faster")
         else:
             print(f"  Sync requests:   litellm is {-sync_diff:.1f}ms faster")
-    
+
     arc_stream = make_result(arcllm_data, "streaming_ttft", "arcllm")
     lit_stream = make_result(litellm_data, "streaming_ttft", "litellm")
     if arc_stream.values and lit_stream.values:
@@ -683,18 +696,24 @@ def print_comparison(
             print(f"  Streaming TTFT:  arcllm is {stream_diff:.1f}ms faster")
         else:
             print(f"  Streaming TTFT:  litellm is {-stream_diff:.1f}ms faster")
-    
+
     arc_conc = make_result(arcllm_data, "concurrent_batch_time", "arcllm")
     lit_conc = make_result(litellm_data, "concurrent_batch_time", "litellm")
     if arc_conc.values and lit_conc.values:
         conc_diff = lit_conc.median - arc_conc.median
         if conc_diff > 0:
-            print(f"  Concurrent:      arcllm is {conc_diff:.1f}ms faster ({concurrency} parallel requests)")
+            print(
+                f"  Concurrent:      arcllm is {conc_diff:.1f}ms faster ({concurrency} parallel requests)"
+            )
         else:
-            print(f"  Concurrent:      litellm is {-conc_diff:.1f}ms faster ({concurrency} parallel requests)")
-    
-    print(f"  uvloop:          {'✅ Enabled for arcllm' if arcllm_data.get('uvloop') else '❌ Not available'}")
-    
+            print(
+                f"  Concurrent:      litellm is {-conc_diff:.1f}ms faster ({concurrency} parallel requests)"
+            )
+
+    print(
+        f"  uvloop:          {'✅ Enabled for arcllm' if arcllm_data.get('uvloop') else '❌ Not available'}"
+    )
+
     print("=" * 80)
 
 
@@ -734,17 +753,15 @@ def save_results(
             **litellm_data,
         },
     }
-    
+
     with open(output_path, "w") as f:
         json.dump(data, f, indent=2)
-    
+
     print(f"\nResults saved to {output_path}")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark arcllm vs litellm performance"
-    )
+    parser = argparse.ArgumentParser(description="Benchmark arcllm vs litellm performance")
     parser.add_argument(
         "--provider",
         default="groq",
@@ -788,9 +805,9 @@ def main():
         action="store_true",
         help="Skip litellm benchmarks (arcllm only)",
     )
-    
+
     args = parser.parse_args()
-    
+
     print("=" * 80)
     print("arcllm vs litellm Benchmark (ISOLATED SUBPROCESSES)")
     print("=" * 80)
@@ -804,29 +821,29 @@ def main():
     print(f"Temperature: {BENCHMARK_TEMPERATURE}")
     print("=" * 80)
     print()
-    
+
     # Measure import times (in isolated processes)
     print("Measuring import times (isolated processes)...")
     arcllm_import = measure_import_time("arcllm", use_uvloop=not args.no_uvloop)
     print(f"  arcllm: {arcllm_import:.1f}ms")
-    
+
     if not args.skip_litellm:
         litellm_import = measure_import_time("litellm")
         print(f"  litellm: {litellm_import:.1f}ms")
     else:
         litellm_import = 0
-    
+
     # Measure memory
     print("\nMeasuring memory usage (isolated processes)...")
     arcllm_memory = measure_memory("arcllm")
     print(f"  arcllm: {arcllm_memory:.1f}MB")
-    
+
     if not args.skip_litellm:
         litellm_memory = measure_memory("litellm")
         print(f"  litellm: {litellm_memory:.1f}MB")
     else:
         litellm_memory = 0
-    
+
     # Run arcllm benchmarks (isolated subprocess with uvloop)
     print("\nRunning arcllm benchmarks (isolated subprocess)...")
     print(f"  uvloop: {'disabled' if args.no_uvloop else 'enabled'}")
@@ -839,7 +856,7 @@ def main():
         concurrency=args.concurrency,
     )
     print(f"  ✅ Completed (uvloop={arcllm_data.get('uvloop', False)})")
-    
+
     if not args.skip_litellm:
         print("\nRunning litellm benchmarks (isolated subprocess)...")
         litellm_data = run_litellm_benchmark_isolated(
@@ -852,7 +869,7 @@ def main():
         print("  ✅ Completed")
     else:
         litellm_data = {}
-    
+
     # Print comparison
     print_comparison(
         arcllm_data,
@@ -863,7 +880,7 @@ def main():
         litellm_memory,
         args.concurrency,
     )
-    
+
     # Save results
     save_results(
         args.output,

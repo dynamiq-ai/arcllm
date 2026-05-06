@@ -146,19 +146,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run benchmarks
+      - name: Run overhead microbenchmarks
         run: |
-          python benchmarks/benchmark.py 2>&1 | tee benchmark-results.txt
+          python benchmarks/overhead.py 2>&1 | tee benchmark-results.txt
 
-      - name: Run benchmark regression tests
+      - name: Enforce overhead regression gates
         run: |
-          python benchmarks/benchmark_ci.py
+          python benchmarks/overhead.py --ci --json > overhead-results.json
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results
-          path: benchmark-results.txt
+          path: |
+            benchmark-results.txt
+            overhead-results.json
 
   streaming-stress-tests:
     name: Streaming Stress Tests
@@ -186,22 +188,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Only providers with a `tests/providers/test_<name>.py` file. Adding a
+        # new provider here without the corresponding file will fail loudly
+        # rather than silently passing — that's the point.
         provider:
           - openai
           - anthropic
           - gemini
-          - azure
           - mistral
-          - cohere
-          - groq
           - bedrock
-          - together
-          - fireworks
-          - deepseek
-          - perplexity
           - ollama
-          - vertex
-          - databricks
     steps:
       - uses: actions/checkout@v4
 
@@ -218,10 +214,8 @@ jobs:
       - name: Run provider-specific tests
         run: |
           pytest tests/providers/test_${{ matrix.provider }}.py \
-            -v \
-            --tb=short \
-            --junitxml=junit-${{ matrix.provider }}.xml \
-            || echo "No tests found for ${{ matrix.provider }} or tests failed"
+            -v --tb=short \
+            --junitxml=junit-${{ matrix.provider }}.xml
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -251,24 +245,11 @@ jobs:
       - name: Build package
         run: python -m build
 
-      - name: Verify zero runtime dependencies
+      - name: Verify wheel imports cleanly
         run: |
-          # Extract and check dependencies from built wheel
-          python -c "
-          import zipfile
-          import glob
-          whl = glob.glob('dist/*.whl')[0]
-          with zipfile.ZipFile(whl) as z:
-              for name in z.namelist():
-                  if name.endswith('METADATA'):
-                      content = z.read(name).decode()
-                      deps = [l for l in content.split('\n') if l.startswith('Requires-Dist:')]
-                      if deps:
-                          print('ERROR: Found runtime dependencies:', deps)
-                          exit(1)
-                      else:
-                          print('OK: No runtime dependencies')
-          "
+          python -m venv /tmp/wheel-smoke
+          /tmp/wheel-smoke/bin/pip install --quiet dist/*.whl
+          /tmp/wheel-smoke/bin/python -c "import arcllm; print(f'arcllm {arcllm.__version__} imported OK')"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

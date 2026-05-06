@@ -72,7 +72,6 @@ import pytest
 
 from tests.integration.base import IntegrationTestBase
 
-
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -83,30 +82,41 @@ def get_test_models() -> list[str]:
     env_models = os.environ.get("OPENAI_TEST_MODELS", "")
     if env_models:
         return [m.strip() for m in env_models.split(",") if m.strip()]
-    
+
     # Default models to test - ALL available models
     # As of January 2026: GPT-5.2 is latest flagship
     # We test ALL models to ensure compatibility
     if os.environ.get("ARCLLM_CI_MODE") == "true":
         return ["gpt-4o-mini", "gpt-5-mini"]  # Fast CI with both legacy and new
-    
+
     # Full test suite - all major models
     return [
-        "gpt-4o-mini",      # Legacy, full parameter support
-        "gpt-4o",           # Legacy flagship  
-        "gpt-4.1-mini",     # GPT-4.1 series
-        "gpt-5-mini",       # GPT-5 series (restricted params)
-        "gpt-5-nano",       # GPT-5 nano (restricted params)
+        "gpt-4o-mini",  # Legacy, full parameter support
+        "gpt-4o",  # Legacy flagship
+        "gpt-4.1-mini",  # GPT-4.1 series
+        "gpt-5-mini",  # GPT-5 series (restricted params)
+        "gpt-5-nano",  # GPT-5 nano (restricted params)
     ]
 
 
 # Models with restricted parameters (like o1 reasoning models)
 # These don't support temperature, top_p, or other sampling parameters
 RESTRICTED_PARAM_MODELS = {
-    "o1", "o1-mini", "o1-preview", "o1-pro",
-    "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-turbo",
-    "gpt-5.1", "gpt-5.1-mini", "gpt-5.1-nano",
-    "gpt-5.2", "gpt-5.2-mini", "gpt-5.2-nano", "gpt-5.2-turbo",
+    "o1",
+    "o1-mini",
+    "o1-preview",
+    "o1-pro",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-5-turbo",
+    "gpt-5.1",
+    "gpt-5.1-mini",
+    "gpt-5.1-nano",
+    "gpt-5.2",
+    "gpt-5.2-mini",
+    "gpt-5.2-nano",
+    "gpt-5.2-turbo",
 }
 
 
@@ -115,7 +125,7 @@ def is_restricted_model(model: str) -> bool:
     # Strip provider prefix if present
     if "/" in model:
         model = model.split("/", 1)[1]
-    
+
     # Check exact match or prefix match
     for restricted in RESTRICTED_PARAM_MODELS:
         if model == restricted or model.startswith(f"{restricted}-"):
@@ -126,7 +136,7 @@ def is_restricted_model(model: str) -> bool:
 def get_completion_kwargs(model: str, **kwargs: Any) -> dict[str, Any]:
     """Get completion kwargs adjusted for model restrictions."""
     result = dict(kwargs)
-    
+
     if is_restricted_model(model):
         # Remove unsupported parameters for restricted models
         result.pop("temperature", None)
@@ -136,7 +146,7 @@ def get_completion_kwargs(model: str, **kwargs: Any) -> dict[str, Any]:
         # Convert max_tokens to max_completion_tokens
         if "max_tokens" in result:
             result["max_completion_tokens"] = result.pop("max_tokens")
-    
+
     return result
 
 
@@ -169,7 +179,7 @@ pytestmark = [
 class TestOpenAIIntegration(IntegrationTestBase):
     """
     Comprehensive OpenAI integration tests.
-    
+
     Tests all major features:
     - Basic completion
     - Async completion
@@ -179,12 +189,12 @@ class TestOpenAIIntegration(IntegrationTestBase):
     - Embeddings
     - Error handling
     - Cost calculation
-    
+
     As of January 2026:
     - GPT-5.2 is the latest flagship model (released December 11, 2025)
     - GPT-4o is being retired on February 16, 2026
     - GPT-3.5-turbo is deprecated
-    
+
     See: https://platform.openai.com/docs/models
     """
 
@@ -207,7 +217,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_simple_completion(self) -> None:
         """
         Test basic chat completion.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/api-reference/chat/create
         """
         from arcllm import completion
@@ -254,7 +264,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_multi_turn_conversation(self) -> None:
         """
         Test multi-turn conversation with message history.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/guides/text-generation
         """
         from arcllm import completion
@@ -305,7 +315,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     async def test_async_completion(self) -> None:
         """
         Test async chat completion.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/api-reference/chat/create
         """
         from arcllm import acompletion
@@ -357,7 +367,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_streaming_completion(self) -> None:
         """
         Test streaming chat completion.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/api-reference/streaming
         """
         from arcllm import completion
@@ -375,9 +385,8 @@ class TestOpenAIIntegration(IntegrationTestBase):
 
         for chunk in response:
             chunks.append(chunk)
-            if chunk.choices and chunk.choices[0].delta:
-                if chunk.choices[0].delta.content:
-                    content_parts.append(chunk.choices[0].delta.content)
+            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                content_parts.append(chunk.choices[0].delta.content)
 
         assert len(chunks) > 1, "Expected multiple chunks"
         assert len(content_parts) > 0, "Expected content deltas"
@@ -388,9 +397,9 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_streaming_with_usage(self) -> None:
         """
         Test streaming with include_usage option.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/api-reference/chat/create#chat-create-stream_options
-        
+
         When stream_options.include_usage is true, the final chunk contains
         usage information.
         """
@@ -416,7 +425,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_streaming_with_chunk_builder(self) -> None:
         """
         Test assembling streamed response with stream_chunk_builder.
-        
+
         This is useful when you need to accumulate the full response
         from streaming chunks.
         """
@@ -470,7 +479,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_tool_calling(self) -> None:
         """
         Test function/tool calling.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/guides/function-calling
         """
         from arcllm import completion
@@ -509,8 +518,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
 
         # Model should call the tool
         has_tool_calls = (
-            choice.message.tool_calls is not None 
-            and len(choice.message.tool_calls) > 0
+            choice.message.tool_calls is not None and len(choice.message.tool_calls) > 0
         )
 
         if has_tool_calls:
@@ -519,7 +527,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
             assert tool_call.type == "function"
             assert tool_call.function is not None
             assert tool_call.function.name == "get_weather"
-            
+
             # Arguments should be valid JSON
             args = json.loads(tool_call.function.arguments)
             assert "location" in args
@@ -562,7 +570,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_multiple_tool_calls(self) -> None:
         """
         Test parallel tool calls (multiple calls in one response).
-        
+
         OpenAI Docs: https://platform.openai.com/docs/guides/function-calling/parallel-function-calling
         """
         from arcllm import completion
@@ -634,21 +642,25 @@ class TestOpenAIIntegration(IntegrationTestBase):
         choice = response.choices[0]
         if choice.message.tool_calls:
             tool_call = choice.message.tool_calls[0]
-            
+
             # Add assistant message with tool call
-            messages.append({
-                "role": "assistant",
-                "content": choice.message.content,
-                "tool_calls": [tc.model_dump() for tc in choice.message.tool_calls],
-            })
-            
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [tc.model_dump() for tc in choice.message.tool_calls],
+                }
+            )
+
             # Add tool result
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": '{"time": "3:45 PM"}',
-            })
-            
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": '{"time": "3:45 PM"}',
+                }
+            )
+
             # Second call - model responds with result
             final_response = self.retry_on_rate_limit(
                 completion,
@@ -657,7 +669,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
                 tools=tools,
                 max_tokens=50,
             )
-            
+
             assert final_response.choices[0].message.content is not None
 
     # =========================================================================
@@ -667,9 +679,9 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_structured_output_json_mode(self) -> None:
         """
         Test JSON mode structured output.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/guides/structured-outputs/json-mode
-        
+
         Note: You must include "JSON" in the prompt when using json_object mode.
         """
         from arcllm import completion
@@ -681,7 +693,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
                 {
                     "role": "user",
                     "content": 'Return a JSON object with "name" (string) and "age" (number). '
-                              'Example: {"name": "Alice", "age": 30}',
+                    'Example: {"name": "Alice", "age": 30}',
                 }
             ],
             response_format={"type": "json_object"},
@@ -697,9 +709,9 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_structured_output_json_schema(self) -> None:
         """
         Test JSON schema structured output (strict mode).
-        
+
         OpenAI Docs: https://platform.openai.com/docs/guides/structured-outputs
-        
+
         With strict: true, the output is guaranteed to match the schema.
         Only supported on gpt-4o, gpt-4o-mini, gpt-4o-2024-08-06.
         """
@@ -762,7 +774,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
         assert response.usage.total_tokens == (
             response.usage.prompt_tokens + response.usage.completion_tokens
         )
-        
+
         # Check model_extra compatibility
         assert "usage" in response.model_extra
         assert response.model_extra["usage"]["prompt_tokens"] > 0
@@ -790,7 +802,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_embeddings(self) -> None:
         """
         Test embedding generation.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/api-reference/embeddings/create
         """
         from arcllm import embedding
@@ -814,7 +826,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
         from arcllm import embedding
 
         texts = ["Hello, world!", "How are you?", "Goodbye!"]
-        
+
         response = self.retry_on_rate_limit(
             embedding,
             model=f"{self.PROVIDER}/{self.EMBEDDING_MODEL}",
@@ -829,9 +841,9 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_embedding_with_dimensions(self) -> None:
         """
         Test embedding with reduced dimensions.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/api-reference/embeddings/create#embeddings-create-dimensions
-        
+
         Only supported for text-embedding-3-small and text-embedding-3-large.
         """
         from arcllm import embedding
@@ -883,9 +895,9 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_invalid_model_error(self) -> None:
         """
         Test that invalid model raises appropriate error.
-        
+
         OpenAI Docs: https://platform.openai.com/docs/guides/error-codes
-        
+
         Expected: 404 error (model not found)
         """
         from arcllm import completion
@@ -901,7 +913,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_invalid_api_key_error(self) -> None:
         """
         Test that invalid API key raises authentication error.
-        
+
         Expected: 401 Unauthorized
         """
         from arcllm import completion
@@ -918,7 +930,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
     def test_invalid_request_error(self) -> None:
         """
         Test that invalid request raises appropriate error.
-        
+
         Expected: 400 Bad Request
         """
         from arcllm import completion
@@ -951,7 +963,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
         assert response.object == "chat.completion"
         assert response.created > 0
         assert response.model is not None
-        
+
         # Check choices
         assert len(response.choices) == 1
         choice = response.choices[0]
@@ -975,7 +987,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
         assert "id" in data
         assert "choices" in data
         assert "usage" in data
-        
+
         # Should be JSON serializable
         json_str = json.dumps(data)
         assert isinstance(json_str, str)
@@ -989,7 +1001,7 @@ class TestOpenAIIntegration(IntegrationTestBase):
 class TestOpenAIMultipleModels:
     """
     Test multiple OpenAI models to ensure broad compatibility.
-    
+
     These tests run against different models based on configuration.
     """
 
@@ -1078,6 +1090,7 @@ class TestOpenAIMultipleModels:
     def test_model_async_completion(self, model_name: str) -> None:
         """Test async completion across multiple models."""
         import asyncio
+
         from arcllm import acompletion
 
         async def run_test():
@@ -1103,7 +1116,7 @@ class TestOpenAIMultipleModels:
 class TestOpenAIPerformance:
     """
     Performance and stress tests.
-    
+
     These tests are marked as slow and can be skipped with:
         pytest -m "not slow"
     """
@@ -1138,9 +1151,7 @@ class TestOpenAIPerformance:
                 max_tokens=5,
             )
 
-        results = await asyncio.gather(
-            *[make_request(i) for i in range(5)]
-        )
+        results = await asyncio.gather(*[make_request(i) for i in range(5)])
 
         assert len(results) == 5
         for r in results:

@@ -163,15 +163,9 @@ class SSEParser:
                 data_str = _NEWLINE.join(
                     d.decode("utf-8", errors="replace") for d in self._current_data
                 )
-                event_str = (
-                    self._current_event
-                    if isinstance(self._current_event, str)
-                    else self._current_event.decode("utf-8", errors="replace")
-                )
+                event_str = self._current_event
                 id_str = (
-                    self._current_id.decode("utf-8", errors="replace")
-                    if self._current_id
-                    else None
+                    self._current_id.decode("utf-8", errors="replace") if self._current_id else None
                 )
 
                 event = SSEEvent(
@@ -235,15 +229,9 @@ class SSEParser:
             data_str = _NEWLINE.join(
                 d.decode("utf-8", errors="replace") for d in self._current_data
             )
-            event_str = (
-                self._current_event
-                if isinstance(self._current_event, str)
-                else self._current_event.decode("utf-8", errors="replace")
-            )
+            event_str = self._current_event
             id_str = (
-                self._current_id.decode("utf-8", errors="replace")
-                if self._current_id
-                else None
+                self._current_id.decode("utf-8", errors="replace") if self._current_id else None
             )
 
             event = SSEEvent(

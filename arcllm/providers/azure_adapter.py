@@ -1,8 +1,18 @@
 """
-Azure OpenAI adapter for arcllm.
+Azure adapter for arcllm.
 
-Azure OpenAI uses the same API format as OpenAI but with different
-authentication and endpoint structure.
+Azure exposes two distinct serving surfaces, both reachable through this adapter:
+
+- **Azure OpenAI Service**: GPT-5/4o/4.1, o-series reasoning, and OpenAI
+  embeddings. Endpoint pattern
+  ``{resource}.openai.azure.com/openai/deployments/{deployment}/...``.
+- **Azure AI Foundry serverless**: Phi, Llama, Cohere, Mistral, etc. on the
+  unified ``/models/chat/completions?api-version=...`` endpoint. Wire format
+  is OpenAI-compatible (Azure normalised it across vendors).
+
+Family detection: model ids beginning with ``gpt-`` / ``o1`` / ``o3`` / ``o4`` /
+``text-embedding-`` route through Azure OpenAI; everything else routes through
+Foundry. Override by setting ``api_base`` explicitly.
 """
 
 from __future__ import annotations
@@ -24,6 +34,26 @@ from arcllm.providers.base import (
 from arcllm.providers.openai_adapter import OpenAIAdapter
 
 __all__ = ["AzureOpenAIAdapter"]
+
+
+_OPENAI_FAMILY_PREFIXES = (
+    "gpt-",
+    "o1",
+    "o3",
+    "o4",
+    "text-embedding-",
+    "chatgpt-",
+)
+
+
+def _is_azure_openai_model(model: str) -> bool:
+    """True for OpenAI models hosted on Azure OpenAI Service.
+
+    Defaults the rest to Azure AI Foundry, which speaks the same OpenAI
+    Chat Completions wire format on a different endpoint path.
+    """
+    m = model.lower()
+    return any(m.startswith(p) for p in _OPENAI_FAMILY_PREFIXES)
 
 
 class AzureOpenAIAdapter(OpenAIAdapter):
@@ -95,7 +125,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
     ) -> RequestData:
         """Build Azure OpenAI chat completion request."""
         # Check params (same as OpenAI)
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         # Build request body (same format as OpenAI)
         body: dict[str, Any] = {
@@ -141,20 +171,43 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         if kwargs.get("response_format"):
             body["response_format"] = kwargs["response_format"]
 
-        # Build Azure-specific URL
-        api_base = self._get_api_base()
-        deployment = self._get_deployment(model)
-        url = f"{api_base}/openai/deployments/{deployment}/chat/completions?api-version={self._api_version}"
+        # Body needs the model id when targeting Foundry serverless.
+        if not _is_azure_openai_model(model):
+            body["model"] = model
 
         body_bytes = orjson.dumps(body)
-
         return RequestData(
             method="POST",
-            url=url,
+            url=self._chat_url(model),
             headers=self._get_headers(),
             body=body_bytes,
             timeout=self.config.timeout,
         )
+
+    def _chat_url(self, model: str) -> str:
+        """Resolve the chat-completions URL for ``model`` per Azure family."""
+        api_base = self._get_api_base()
+        if _is_azure_openai_model(model):
+            deployment = self._get_deployment(model)
+            return (
+                f"{api_base}/openai/deployments/{deployment}"
+                f"/chat/completions?api-version={self._api_version}"
+            )
+        # Azure AI Foundry serverless. The endpoint is unified: the model id
+        # goes in the body, not the URL. Some Foundry deployments still want
+        # an api-version query — we pass ours along.
+        return f"{api_base}/models/chat/completions?api-version={self._api_version}"
+
+    def _embedding_url(self, model: str) -> str:
+        """Resolve the embeddings URL for ``model`` per Azure family."""
+        api_base = self._get_api_base()
+        if _is_azure_openai_model(model):
+            deployment = self._get_deployment(model)
+            return (
+                f"{api_base}/openai/deployments/{deployment}"
+                f"/embeddings?api-version={self._api_version}"
+            )
+        return f"{api_base}/models/embeddings?api-version={self._api_version}"
 
     def build_embedding_request(
         self,
@@ -163,12 +216,10 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         input: list[str],
         **kwargs: Any,
     ) -> RequestData:
-        """Build Azure OpenAI embedding request."""
-        body: dict[str, Any] = {
-            "input": input,
-        }
-
-        # Optional parameters
+        """Build Azure embedding request (OpenAI Service or Foundry)."""
+        body: dict[str, Any] = {"input": input}
+        if not _is_azure_openai_model(model):
+            body["model"] = model
         if "encoding_format" in kwargs:
             body["encoding_format"] = kwargs["encoding_format"]
         if "dimensions" in kwargs:
@@ -176,18 +227,10 @@ class AzureOpenAIAdapter(OpenAIAdapter):
         if "user" in kwargs:
             body["user"] = kwargs["user"]
 
-        # Build Azure-specific URL
-        api_base = self._get_api_base()
-        deployment = self._get_deployment(model)
-        url = (
-            f"{api_base}/openai/deployments/{deployment}/embeddings?api-version={self._api_version}"
-        )
-
         body_bytes = orjson.dumps(body)
-
         return RequestData(
             method="POST",
-            url=url,
+            url=self._embedding_url(model),
             headers=self._get_headers(),
             body=body_bytes,
             timeout=self.config.timeout,
@@ -196,3 +239,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
 # Register on import
 register_provider("azure", AzureOpenAIAdapter)
+# Alias for callers using the Azure AI Foundry-style provider name (parity
+# with dynamiq's ``AzureAI`` node, which addresses Foundry deployments
+# directly).
+register_provider("azure_ai", AzureOpenAIAdapter)

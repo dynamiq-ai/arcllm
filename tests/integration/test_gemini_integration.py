@@ -83,7 +83,6 @@ import pytest
 
 from tests.integration.base import IntegrationTestBase
 
-
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -94,16 +93,16 @@ def get_test_models() -> list[str]:
     env_models = os.environ.get("GEMINI_TEST_MODELS", "")
     if env_models:
         return [m.strip() for m in env_models.split(",") if m.strip()]
-    
+
     # Default models to test
     if os.environ.get("ARCLLM_CI_MODE") == "true":
         return ["gemini-2.0-flash"]  # Fast CI with stable model
-    
+
     # Full test suite - major models
     return [
-        "gemini-2.0-flash",       # Stable, fast
+        "gemini-2.0-flash",  # Stable, fast
         "gemini-2.0-flash-lite",  # Lightweight
-        "gemini-2.5-flash",       # Latest flash
+        "gemini-2.5-flash",  # Latest flash
     ]
 
 
@@ -131,7 +130,7 @@ pytestmark = [
 class TestGeminiIntegration(IntegrationTestBase):
     """
     Comprehensive Gemini integration tests.
-    
+
     Tests all major features:
     - Basic completion
     - Async completion
@@ -140,11 +139,11 @@ class TestGeminiIntegration(IntegrationTestBase):
     - Structured output (JSON mode)
     - Embeddings
     - Error handling
-    
+
     As of January 2026:
     - Gemini 2.5 is the latest generation
     - Gemini 3.0 is in preview
-    
+
     See: https://ai.google.dev/gemini-api/docs/models/gemini
     """
 
@@ -171,7 +170,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_simple_completion(self) -> None:
         """
         Test basic chat completion.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/text-generation
         """
         from arcllm import completion
@@ -216,7 +215,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_multi_turn_conversation(self) -> None:
         """
         Test multi-turn conversation with message history.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/text-generation#multi-turn
         """
         from arcllm import completion
@@ -263,7 +262,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     async def test_async_completion(self) -> None:
         """
         Test async chat completion.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/text-generation
         """
         from arcllm import acompletion
@@ -312,7 +311,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_streaming_completion(self) -> None:
         """
         Test streaming chat completion.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/text-generation#streaming
         """
         from arcllm import completion
@@ -330,9 +329,8 @@ class TestGeminiIntegration(IntegrationTestBase):
 
         for chunk in response:
             chunks.append(chunk)
-            if chunk.choices and chunk.choices[0].delta:
-                if chunk.choices[0].delta.content:
-                    content_parts.append(chunk.choices[0].delta.content)
+            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                content_parts.append(chunk.choices[0].delta.content)
 
         assert len(chunks) > 0, "Expected at least one chunk"
         assert len(content_parts) > 0, "Expected content deltas"
@@ -394,7 +392,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_tool_calling(self) -> None:
         """
         Test function/tool calling.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/function-calling
         """
         from arcllm import completion
@@ -432,8 +430,7 @@ class TestGeminiIntegration(IntegrationTestBase):
 
         # Model should call the tool
         has_tool_calls = (
-            choice.message.tool_calls is not None 
-            and len(choice.message.tool_calls) > 0
+            choice.message.tool_calls is not None and len(choice.message.tool_calls) > 0
         )
 
         if has_tool_calls:
@@ -442,7 +439,7 @@ class TestGeminiIntegration(IntegrationTestBase):
             assert tool_call.type == "function"
             assert tool_call.function is not None
             assert tool_call.function.name == "get_weather"
-            
+
             # Arguments should be valid JSON
             args = json.loads(tool_call.function.arguments)
             assert "location" in args
@@ -476,22 +473,26 @@ class TestGeminiIntegration(IntegrationTestBase):
         choice = response.choices[0]
         if choice.message.tool_calls:
             tool_call = choice.message.tool_calls[0]
-            
+
             # Add assistant message with tool call
-            messages.append({
-                "role": "assistant",
-                "content": choice.message.content,
-                "tool_calls": [tc.model_dump() for tc in choice.message.tool_calls],
-            })
-            
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [tc.model_dump() for tc in choice.message.tool_calls],
+                }
+            )
+
             # Add tool result
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "name": tool_call.function.name,
-                "content": '{"time": "3:45 PM"}',
-            })
-            
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": '{"time": "3:45 PM"}',
+                }
+            )
+
             # Second call - model responds with result
             final_response = self.retry_on_rate_limit(
                 completion,
@@ -500,7 +501,7 @@ class TestGeminiIntegration(IntegrationTestBase):
                 tools=tools,
                 max_tokens=50,
             )
-            
+
             assert final_response.choices[0].message.content is not None
 
     # =========================================================================
@@ -510,7 +511,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_structured_output_json_mode(self) -> None:
         """
         Test JSON mode structured output.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/json-mode
         """
         from arcllm import completion
@@ -522,7 +523,7 @@ class TestGeminiIntegration(IntegrationTestBase):
                 {
                     "role": "user",
                     "content": 'Return a JSON object with "name" (string) and "age" (number). '
-                              'Example: {"name": "Alice", "age": 30}',
+                    'Example: {"name": "Alice", "age": 30}',
                 }
             ],
             response_format={"type": "json_object"},
@@ -554,7 +555,7 @@ class TestGeminiIntegration(IntegrationTestBase):
         assert response.usage.prompt_tokens > 0
         assert response.usage.completion_tokens >= 0
         assert response.usage.total_tokens > 0
-        
+
         # Check model_extra compatibility
         assert "usage" in response.model_extra
 
@@ -565,7 +566,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_embeddings(self) -> None:
         """
         Test embedding generation.
-        
+
         Gemini Docs: https://ai.google.dev/gemini-api/docs/embeddings
         """
         from arcllm import embedding
@@ -589,7 +590,7 @@ class TestGeminiIntegration(IntegrationTestBase):
         from arcllm import embedding
 
         texts = ["Hello, world!", "How are you?", "Goodbye!"]
-        
+
         response = self.retry_on_rate_limit(
             embedding,
             model=f"{self.PROVIDER}/{self.EMBEDDING_MODEL}",
@@ -622,7 +623,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_invalid_model_error(self) -> None:
         """
         Test that invalid model raises appropriate error.
-        
+
         Expected: 404 error (model not found)
         """
         from arcllm import completion
@@ -638,7 +639,7 @@ class TestGeminiIntegration(IntegrationTestBase):
     def test_invalid_api_key_error(self) -> None:
         """
         Test that invalid API key raises authentication error.
-        
+
         Expected: 401 Unauthorized
         """
         from arcllm import completion
@@ -672,7 +673,7 @@ class TestGeminiIntegration(IntegrationTestBase):
         assert response.object == "chat.completion"
         assert response.created > 0
         assert response.model is not None
-        
+
         # Check choices
         assert len(response.choices) >= 1
         choice = response.choices[0]
@@ -696,7 +697,7 @@ class TestGeminiIntegration(IntegrationTestBase):
         assert "id" in data
         assert "choices" in data
         assert "usage" in data
-        
+
         # Should be JSON serializable
         json_str = json.dumps(data)
         assert isinstance(json_str, str)
@@ -710,7 +711,7 @@ class TestGeminiIntegration(IntegrationTestBase):
 class TestGeminiMultipleModels:
     """
     Test multiple Gemini models to ensure broad compatibility.
-    
+
     These tests run against different models based on configuration.
     """
 
@@ -784,6 +785,7 @@ class TestGeminiMultipleModels:
     def test_model_async_completion(self, model_name: str) -> None:
         """Test async completion across multiple models."""
         import asyncio
+
         from arcllm import acompletion
 
         async def run_test():
@@ -808,7 +810,7 @@ class TestGeminiMultipleModels:
 class TestGeminiPerformance:
     """
     Performance and stress tests.
-    
+
     These tests are marked as slow and can be skipped with:
         pytest -m "not slow"
     """
@@ -821,6 +823,7 @@ class TestGeminiPerformance:
     def test_rapid_sequential_requests(self) -> None:
         """Test multiple sequential requests."""
         import time
+
         from arcllm import completion
 
         for i in range(5):
@@ -844,9 +847,7 @@ class TestGeminiPerformance:
                 max_tokens=5,
             )
 
-        results = await asyncio.gather(
-            *[make_request(i) for i in range(5)]
-        )
+        results = await asyncio.gather(*[make_request(i) for i in range(5)])
 
         assert len(results) == 5
         for r in results:

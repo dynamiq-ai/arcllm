@@ -185,9 +185,7 @@ class TestFireworksIntegration(IntegrationTestBase):
                     "description": "Get the current weather in a location",
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "location": {"type": "string", "description": "City name"}
-                        },
+                        "properties": {"location": {"type": "string", "description": "City name"}},
                         "required": ["location"],
                     },
                 },
@@ -484,7 +482,9 @@ class TestFireworksIntegration(IntegrationTestBase):
         response = self.retry_on_rate_limit(
             completion,
             model=f"{self.PROVIDER}/accounts/fireworks/models/qwen2p5-vl-32b-instruct",
-            messages=[{"role": "user", "content": "Describe the concept of 'sunrise' in one sentence."}],
+            messages=[
+                {"role": "user", "content": "Describe the concept of 'sunrise' in one sentence."}
+            ],
             max_tokens=50,
         )
 
@@ -520,7 +520,7 @@ class TestFireworksIntegration(IntegrationTestBase):
                 {
                     "role": "user",
                     "content": 'Return a JSON object with "name" (string) and "age" (number). '
-                              'Example: {"name": "Alice", "age": 30}',
+                    'Example: {"name": "Alice", "age": 30}',
                 }
             ],
             response_format={"type": "json_object"},
@@ -597,6 +597,7 @@ class TestFireworksMultipleModels:
     def setup_class(cls) -> None:
         """Check if credentials are available."""
         import os
+
         if not os.environ.get("FIREWORKS_API_KEY"):
             pytest.skip("Missing FIREWORKS_API_KEY environment variable")
 

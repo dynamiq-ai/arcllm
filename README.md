@@ -1,18 +1,18 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/arcllm/arcllm/main/docs/assets/logo.svg" alt="ArcLLM" width="400">
+  <img src="https://raw.githubusercontent.com/dynamiq-ai/arcllm/main/docs/assets/logo.svg" alt="ArcLLM" width="400">
 </p>
 
 <h3 align="center">The arc connecting you to every LLM</h3>
 
 <p align="center">
-  <strong>Zero dependencies. Maximum performance. One unified API.</strong>
+  <strong>Minimal dependencies. Maximum performance. One unified API.</strong>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/arcllm/"><img src="https://img.shields.io/pypi/v/arcllm?color=blue&label=PyPI" alt="PyPI"></a>
   <a href="https://pypi.org/project/arcllm/"><img src="https://img.shields.io/pypi/pyversions/arcllm" alt="Python"></a>
-  <a href="https://github.com/arcllm/arcllm/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
-  <a href="https://github.com/arcllm/arcllm/actions"><img src="https://img.shields.io/github/actions/workflow/status/arcllm/arcllm/ci.yml?branch=main" alt="CI"></a>
+  <a href="https://github.com/dynamiq-ai/arcllm/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
+  <a href="https://github.com/dynamiq-ai/arcllm/actions"><img src="https://img.shields.io/github/actions/workflow/status/dynamiq-ai/arcllm/ci.yml?branch=main" alt="CI"></a>
 </p>
 
 <p align="center">
@@ -27,22 +27,20 @@
 
 ## Why ArcLLM?
 
-| Feature | ArcLLM | Others |
-|---------|--------|--------|
-| **Dependencies** | 0 (stdlib only) | 10-50+ packages |
-| **Install size** | ~100KB | 50-200MB |
-| **Cold start** | ~10ms | 500ms-2s |
-| **API** | OpenAI-compatible | Varies |
+ArcLLM ships a single unified, OpenAI-compatible surface across every major LLM provider with a tightly curated runtime footprint:
 
-ArcLLM is built for developers who want **speed**, **simplicity**, and **reliability** when working with LLMs.
+- **4 runtime deps**: `httpx[http2]`, `aiohttp`, `msgspec`, `orjson` — all chosen for raw speed.
+- **OpenAI-compatible API** so existing client code keeps working.
+- **Sync + async, streaming, tools, structured output, vision, embeddings** in one library.
+- **Built-in cost + capability tracking** for every supported model.
+
+Built for developers who want **speed**, **simplicity**, and **reliability** when working with LLMs.
 
 ## Installation
 
 ```bash
 pip install arcllm
 ```
-
-That's it. No dependency hell. No version conflicts. Just works.
 
 ## Quick Start
 
@@ -74,49 +72,53 @@ for chunk in stream:
 
 ```python
 response = await arcllm.acompletion(
-    model="anthropic/claude-3-5-sonnet-latest",
+    model="anthropic/claude-sonnet-4-5",
     messages=[{"role": "user", "content": "Explain quantum computing"}]
 )
 ```
 
-### Different Providers
+### Different providers
 
 ```python
 # OpenAI
-response = arcllm.completion(model="gpt-4o", messages=messages)
+arcllm.completion(model="gpt-4o", messages=messages)
 
 # Anthropic
-response = arcllm.completion(model="anthropic/claude-3-5-sonnet-latest", messages=messages)
+arcllm.completion(model="anthropic/claude-sonnet-4-5", messages=messages)
 
 # Google Gemini
-response = arcllm.completion(model="gemini/gemini-1.5-pro", messages=messages)
+arcllm.completion(model="gemini/gemini-2.5-pro", messages=messages)
 
 # Groq (ultra-fast inference)
-response = arcllm.completion(model="groq/llama-3.3-70b-versatile", messages=messages)
+arcllm.completion(model="groq/llama-3.3-70b-versatile", messages=messages)
+
+# Together AI / Fireworks (open-weight flagships: Llama 4, Qwen 3, DeepSeek, Kimi, GLM, MiniMax)
+arcllm.completion(model="together_ai/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", messages=messages)
+arcllm.completion(model="fireworks_ai/accounts/fireworks/models/deepseek-v4-pro", messages=messages)
 
 # Local with Ollama
-response = arcllm.completion(model="ollama/llama3.2", messages=messages)
+arcllm.completion(model="ollama/llama3.3", messages=messages)
 ```
 
-## Supported Providers
+## Supported providers
 
-| Provider | Prefix | Models | Environment Variable |
-|----------|--------|--------|---------------------|
-| **OpenAI** | `openai/` | GPT-4o, GPT-4, o1, o3 | `OPENAI_API_KEY` |
-| **Anthropic** | `anthropic/` | Claude 3.5, Claude 3 | `ANTHROPIC_API_KEY` |
-| **Google Gemini** | `gemini/` | Gemini 1.5, Gemini 2.0 | `GEMINI_API_KEY` |
-| **Azure OpenAI** | `azure/` | GPT-4o, GPT-4 | `AZURE_OPENAI_API_KEY` |
-| **AWS Bedrock** | `bedrock/` | Claude, Llama, Titan | AWS credentials |
-| **Google Vertex** | `vertex_ai/` | Gemini, PaLM | `GOOGLE_ACCESS_TOKEN` |
-| **Mistral** | `mistral/` | Mistral Large, Codestral | `MISTRAL_API_KEY` |
-| **Groq** | `groq/` | Llama 3.3, Mixtral | `GROQ_API_KEY` |
-| **Together AI** | `together_ai/` | Llama, Mixtral, Qwen | `TOGETHER_API_KEY` |
-| **Fireworks** | `fireworks_ai/` | Llama, Mixtral | `FIREWORKS_API_KEY` |
-| **DeepSeek** | `deepseek/` | DeepSeek V3, Coder | `DEEPSEEK_API_KEY` |
-| **Perplexity** | `perplexity/` | Sonar, Online | `PERPLEXITY_API_KEY` |
-| **Cohere** | `cohere/` | Command R+ | `COHERE_API_KEY` |
-| **Databricks** | `databricks/` | DBRX, Llama | `DATABRICKS_TOKEN` |
-| **Ollama** | `ollama/` | Any local model | (local) |
+| Provider | Prefix | Models | Auth |
+|----------|--------|--------|------|
+| **OpenAI** | `openai/` | GPT-5, GPT-4o, o-series reasoning | `OPENAI_API_KEY` |
+| **Anthropic** | `anthropic/` | Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 (incl. extended thinking) | `ANTHROPIC_API_KEY` |
+| **Google Gemini** | `gemini/` | Gemini 2.5 / 3.x (with thinking config) | `GEMINI_API_KEY` |
+| **Mistral** | `mistral/` | Mistral Large, Medium, Small, Codestral, Pixtral | `MISTRAL_API_KEY` |
+| **Cohere** | `cohere/` | Command A, Command R+, Aya Vision, Embed v4 | `COHERE_API_KEY` |
+| **Groq** | `groq/` | Llama 3.x / 4.x, GPT-OSS, Qwen 3 | `GROQ_API_KEY` |
+| **Together AI** | `together_ai/` | Llama 4, Qwen 3, DeepSeek V4, Kimi, GLM, MiniMax | `TOGETHER_API_KEY` |
+| **Fireworks AI** | `fireworks_ai/` | DeepSeek V4 Pro, Kimi K2.6, GLM 5.1, Llama, Qwen | `FIREWORKS_API_KEY` |
+| **DeepSeek** | `deepseek/` | DeepSeek V4 Flash + Pro (reasoning + chat) | `DEEPSEEK_API_KEY` |
+| **Perplexity** | `perplexity/` | Sonar, Sonar Pro, Sonar Reasoning, Deep Research | `PERPLEXITY_API_KEY` |
+| **Ollama** | `ollama/` | Local: Llama, Qwen, Gemma, DeepSeek-R1, Phi | (local server) |
+| **Azure** | `azure/` | OpenAI Service + AI Foundry serverless (Phi, Llama, Cohere, Mistral) | `AZURE_OPENAI_API_KEY` |
+| **AWS Bedrock** | `bedrock/` | Anthropic, OpenAI GPT-OSS, Llama, Mistral, Cohere, Nova, Titan, AI21 | AWS SigV4 |
+| **Google Vertex** | `vertex_ai/` | Gemini + Anthropic Claude + Mistral + Llama on Vertex | OAuth (gcloud / ADC) |
+| **Databricks** | `databricks/` | Llama, Claude, Gemini, GPT-5 on Foundation Model APIs | `DATABRICKS_TOKEN` |
 
 ## Features
 
@@ -188,6 +190,91 @@ response = arcllm.completion(
 )
 ```
 
+### 📄 PDF input (Anthropic, Gemini)
+
+```python
+response = arcllm.completion(
+    model="anthropic/claude-haiku-4-5",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "input_file", "file": {
+                "data": pdf_base64, "media_type": "application/pdf"
+            }},
+            {"type": "text", "text": "Summarise this document"},
+        ],
+    }],
+    max_tokens=512,
+)
+```
+
+### 🧠 Reasoning models (thinking budget + reasoning effort)
+
+```python
+# OpenAI o-series + GPT-5 hybrid: reasoning_effort
+arcllm.completion(
+    model="openai/o4-mini",
+    messages=[{"role": "user", "content": "What is 7*8?"}],
+    reasoning_effort="medium",
+    max_completion_tokens=64,
+)
+# (passing temperature= here is dropped automatically with a warning —
+#  o4-mini rejects temperature, and the capability table knows it)
+
+# Anthropic Claude with extended thinking
+arcllm.completion(
+    model="anthropic/claude-opus-4-7",
+    messages=[{"role": "user", "content": "Solve this hard problem"}],
+    thinking_budget=2048,
+    max_tokens=4096,
+)
+
+# Gemini 2.5+ with thinking config
+arcllm.completion(
+    model="gemini/gemini-2.5-pro",
+    messages=[{"role": "user", "content": "Solve"}],
+    thinking_budget=1024,
+    include_thoughts=True,
+)
+```
+
+### 🔎 Citations from grounded providers
+
+```python
+# Perplexity Sonar — search is implicit
+response = arcllm.completion(
+    model="perplexity/sonar-pro",
+    messages=[{"role": "user", "content": "Latest news on small models?"}],
+)
+for c in response.choices[0].message.citations or []:
+    print(f"{c.title or '(no title)'}: {c.url}")
+
+# Anthropic + Gemini grounded responses populate the same field, sourced
+# from `web_search_tool_result` blocks / `groundingMetadata` respectively.
+```
+
+### 🛡️ Built-in provider tools (pass-through)
+
+```python
+# Anthropic web search + code execution
+arcllm.completion(
+    model="anthropic/claude-sonnet-4-5",
+    messages=[{"role": "user", "content": "Research arcllm and run a quick demo"}],
+    tools=[
+        {"type": "web_search_20250305", "name": "web_search"},
+        {"type": "code_execution_20250825", "name": "code_execution"},
+    ],
+    max_tokens=1024,
+)
+
+# Gemini Google Search grounding
+arcllm.completion(
+    model="gemini/gemini-2.5-pro",
+    messages=[{"role": "user", "content": "What happened in AI yesterday?"}],
+    tools=[{"google_search": {}}],
+)
+```
+
 ### 📊 Embeddings
 
 ```python
@@ -215,15 +302,13 @@ input_cost, output_cost = arcllm.cost_per_token(
 )
 ```
 
-### 🔍 Model Capabilities
+### 🔍 Model capabilities
 
 ```python
-# Check what models can do
-arcllm.supports_vision("gpt-4o")           # True
-arcllm.supports_vision("gpt-3.5-turbo")    # False
-
-arcllm.supports_tools("claude-3-5-sonnet-latest")  # True
-arcllm.supports_pdf_input("gemini-1.5-pro")        # True
+arcllm.supports_vision("gpt-4o")                       # True
+arcllm.supports_pdf_input("claude-sonnet-4-5-20250929") # True
+arcllm.supports_tools("gemini-2.5-pro")                # True
+arcllm.supports_structured_output("gpt-4o")            # True
 
 arcllm.get_max_tokens("gpt-4o")  # 16384
 ```
@@ -296,6 +381,10 @@ response = litellm.completion(model="gpt-4o", messages=messages)
 - [Provider Capabilities](docs/providers/CAPABILITIES.md)
 - [Performance Guide](docs/PERF.md)
 - [Contributing](CONTRIBUTING.md)
+
+## Maintained by
+
+[Dynamiq AI](https://github.com/dynamiq-ai). Issues and pull requests welcome.
 
 ## Why "Arc"?
 

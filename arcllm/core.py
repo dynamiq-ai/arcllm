@@ -47,40 +47,44 @@ __all__ = [
 
 # Pre-computed frozenset of config parameters to exclude from completion kwargs.
 # Using frozenset at module level avoids recreating the set on every call.
-_CONFIG_PARAMS: frozenset[str] = frozenset({
-    "api_key",
-    "api_base",
-    "base_url",
-    "api_version",
-    "organization",
-    "project",
-    "timeout",
-    "max_retries",
-    "provider",
-    "azure_deployment",
-    "azure_ad_token",
-    "aws_region",
-    "aws_access_key_id",
-    "aws_secret_access_key",
-    "aws_session_token",
-    "vertex_project",
-    "vertex_location",
-    "extra_headers",
-})
+_CONFIG_PARAMS: frozenset[str] = frozenset(
+    {
+        "api_key",
+        "api_base",
+        "base_url",
+        "api_version",
+        "organization",
+        "project",
+        "timeout",
+        "max_retries",
+        "provider",
+        "azure_deployment",
+        "azure_ad_token",
+        "aws_region",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "aws_session_token",
+        "vertex_project",
+        "vertex_location",
+        "extra_headers",
+    }
+)
 
 # Subset for embedding requests (fewer params needed)
-_EMBEDDING_CONFIG_PARAMS: frozenset[str] = frozenset({
-    "api_key",
-    "api_base",
-    "base_url",
-    "api_version",
-    "organization",
-    "project",
-    "timeout",
-    "max_retries",
-    "provider",
-    "extra_headers",
-})
+_EMBEDDING_CONFIG_PARAMS: frozenset[str] = frozenset(
+    {
+        "api_key",
+        "api_base",
+        "base_url",
+        "api_version",
+        "organization",
+        "project",
+        "timeout",
+        "max_retries",
+        "provider",
+        "extra_headers",
+    }
+)
 
 # Global HTTP clients (lazy initialized)
 _http_client: HTTPClient | None = None
@@ -125,15 +129,6 @@ def _get_async_http_client() -> AsyncHTTPClient:
         _async_client_loop_id = current_loop_id
 
     return _async_http_client
-
-
-async def _cleanup_async_client() -> None:
-    """Clean up the global async HTTP client. Call on shutdown."""
-    global _async_http_client, _async_client_loop_id
-    if _async_http_client is not None:
-        await _async_http_client.close()
-        _async_http_client = None
-        _async_client_loop_id = None
 
 
 def _build_provider_config(**kwargs: Any) -> ProviderConfig:
@@ -653,7 +648,7 @@ def stream_chunk_builder(
         message = Message(
             role=choice_roles[idx] or "assistant",
             content=content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls or None,
         )
 
         choices.append(

@@ -20,14 +20,23 @@ __all__ = [
     "Choice",
     "ChunkChoice",
     "ChunkDelta",
+    "Citation",
+    "CustomStreamWrapper",
+    "Delta",
     "EmbeddingData",
     # Embedding types
     "EmbeddingResponse",
     "EmbeddingUsage",
     "FunctionCall",
+    # Image types
+    "ImageData",
+    "ImageResponse",
     "Message",
     # Response types
     "ModelResponse",
+    # Rerank types
+    "RerankResponse",
+    "RerankResult",
     "StreamChunk",
     "StreamingResponse",
     "ToolCall",
@@ -74,6 +83,41 @@ class ToolCall(msgspec.Struct):
         return result
 
 
+class Citation(msgspec.Struct):
+    """A single source citation attached to a model response.
+
+    Different providers populate different subsets:
+
+    - Perplexity Sonar: ``url`` always; ``title`` and ``snippet`` when the
+      ``search_results`` block is returned (newer responses).
+    - Gemini grounding: ``url`` and ``title`` from ``groundingChunks``;
+      ``start_index``/``end_index`` from ``groundingSupports`` (segment of the
+      assistant content the citation grounds).
+    - Anthropic web-search: ``url``, ``title``, ``snippet`` from
+      ``web_search_tool_result`` blocks; ``start_index``/``end_index`` from the
+      ``citations`` annotation on the assistant text block.
+    """
+
+    url: str
+    title: str | None = None
+    snippet: str | None = None
+    start_index: int | None = None
+    end_index: int | None = None
+
+    def model_dump(self) -> dict[str, Any]:
+        """Return dict representation for serialization."""
+        result: dict[str, Any] = {"url": self.url}
+        if self.title is not None:
+            result["title"] = self.title
+        if self.snippet is not None:
+            result["snippet"] = self.snippet
+        if self.start_index is not None:
+            result["start_index"] = self.start_index
+        if self.end_index is not None:
+            result["end_index"] = self.end_index
+        return result
+
+
 # =============================================================================
 # Message Types
 # =============================================================================
@@ -87,6 +131,11 @@ class Message(msgspec.Struct):
     tool_calls: list[ToolCall] | None = None
     function_call: FunctionCall | None = None  # Legacy, prefer tool_calls
     refusal: str | None = None
+    # Source citations attached by search-grounded providers (Perplexity,
+    # Gemini grounding, Anthropic web-search). ``None`` for non-grounded
+    # responses; an empty list means "the provider was asked to ground but
+    # returned no sources" (rare).
+    citations: list[Citation] | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Return dict representation for serialization."""
@@ -99,6 +148,8 @@ class Message(msgspec.Struct):
             result["function_call"] = self.function_call.model_dump()
         if self.refusal is not None:
             result["refusal"] = self.refusal
+        if self.citations is not None:
+            result["citations"] = [c.model_dump() for c in self.citations]
         return result
 
 
@@ -108,7 +159,18 @@ class Message(msgspec.Struct):
 
 
 class Usage(msgspec.Struct):
-    """Token usage information from provider."""
+    """Token usage information from the provider.
+
+    Cache-related fields (``cache_read_input_tokens`` /
+    ``cache_creation_input_tokens``) are populated by providers that support
+    prompt caching (Anthropic, Bedrock-Anthropic, Vertex-Anthropic, and
+    Databricks-Claude). ``cache_read_input_tokens`` is the slice of
+    ``prompt_tokens`` that was served from cache and billed at the
+    ``cached_input_cost_per_million`` rate; ``cache_creation_input_tokens``
+    is the slice that was newly written to the cache and billed at a higher
+    rate (per Anthropic docs, ~25% above the base input rate). Both default
+    to ``None`` for providers that don't expose cache tracking.
+    """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -116,6 +178,9 @@ class Usage(msgspec.Struct):
     # Extended fields for providers that report more detail
     prompt_tokens_details: dict[str, Any] | None = None
     completion_tokens_details: dict[str, Any] | None = None
+    # Cache token tracking (Anthropic-family providers)
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Return dict representation for serialization."""
@@ -128,6 +193,10 @@ class Usage(msgspec.Struct):
             result["prompt_tokens_details"] = self.prompt_tokens_details
         if self.completion_tokens_details is not None:
             result["completion_tokens_details"] = self.completion_tokens_details
+        if self.cache_read_input_tokens is not None:
+            result["cache_read_input_tokens"] = self.cache_read_input_tokens
+        if self.cache_creation_input_tokens is not None:
+            result["cache_creation_input_tokens"] = self.cache_creation_input_tokens
         return result
 
 
@@ -210,6 +279,10 @@ class ChunkDelta(msgspec.Struct):
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None  # Partial tool call deltas
     function_call: dict[str, Any] | None = None
+    # Citations as they arrive in the stream (typically on the final chunk
+    # for grounded providers — Perplexity, Gemini grounding, Anthropic
+    # web-search). None on intermediate chunks.
+    citations: list[Citation] | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Return dict representation for serialization."""
@@ -222,6 +295,8 @@ class ChunkDelta(msgspec.Struct):
             result["tool_calls"] = self.tool_calls
         if self.function_call is not None:
             result["function_call"] = self.function_call
+        if self.citations is not None:
+            result["citations"] = [c.model_dump() for c in self.citations]
         return result
 
 
@@ -367,3 +442,100 @@ class EmbeddingResponse(msgspec.Struct):
             "usage": self.usage.model_dump(),
             "object": self.object,
         }
+
+
+# =============================================================================
+# Image Types
+# =============================================================================
+
+
+class ImageData(msgspec.Struct):
+    """A single generated image returned by the provider.
+
+    Either ``url`` or ``b64_json`` is set, depending on ``response_format``
+    on the request. ``revised_prompt`` is populated by DALL-E 3 when the
+    model rewrites the user prompt for safety/style; other providers leave
+    it ``None``.
+    """
+
+    url: str | None = None
+    b64_json: str | None = None
+    revised_prompt: str | None = None
+
+    def model_dump(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        if self.url is not None:
+            result["url"] = self.url
+        if self.b64_json is not None:
+            result["b64_json"] = self.b64_json
+        if self.revised_prompt is not None:
+            result["revised_prompt"] = self.revised_prompt
+        return result
+
+
+class ImageResponse(msgspec.Struct):
+    """Response from an image generation / variation / edit request."""
+
+    created: int
+    data: list[ImageData]
+    model: str = ""
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "created": self.created,
+            "data": [d.model_dump() for d in self.data],
+            "model": self.model,
+        }
+
+
+# =============================================================================
+# Rerank Types
+# =============================================================================
+
+
+class RerankResult(msgspec.Struct):
+    """A single reranked document hit.
+
+    ``index`` is the 0-based position of this document in the ``documents``
+    list passed to :func:`arcllm.rerank`. ``relevance_score`` is the
+    provider-reported score (typically 0..1, but provider-specific). The
+    ``document`` field is populated only when ``return_documents=True`` was
+    passed on the request.
+    """
+
+    index: int
+    relevance_score: float
+    document: str | None = None
+
+    def model_dump(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"index": self.index, "relevance_score": self.relevance_score}
+        if self.document is not None:
+            result["document"] = self.document
+        return result
+
+
+class RerankResponse(msgspec.Struct):
+    """Response from a rerank request.
+
+    ``results`` is sorted by descending relevance.
+    """
+
+    model: str
+    results: list[RerankResult]
+    id: str = ""
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "model": self.model,
+            "results": [r.model_dump() for r in self.results],
+        }
+
+
+# Litellm-compat aliases: dynamiq's tests + TYPE_CHECKING blocks reference
+# names from litellm.utils / litellm. arcllm calls the equivalent types
+# ``ChunkDelta`` and ``StreamingResponse``. Adding these aliases here lets
+# the migration script swap the import path without renaming the symbol at
+# the call sites.
+Delta = ChunkDelta
+CustomStreamWrapper = StreamingResponse

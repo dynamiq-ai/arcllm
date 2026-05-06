@@ -6,6 +6,7 @@ Tests the asynchronous HTTP client using aiohttp.
 
 from __future__ import annotations
 
+import builtins
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -193,12 +194,11 @@ class TestAsyncHTTPClientErrors:
     @pytest.mark.asyncio
     async def test_timeout_error(self):
         """Test timeout error handling."""
-        import asyncio
 
         from arcllm.exceptions import TimeoutError
 
         with patch("aiohttp.ClientSession.request") as mock_request:
-            mock_request.side_effect = asyncio.TimeoutError("Timed out")
+            mock_request.side_effect = builtins.TimeoutError("Timed out")
 
             async with AsyncHTTPClient(max_retries=1) as client:
                 await client._ensure_session()

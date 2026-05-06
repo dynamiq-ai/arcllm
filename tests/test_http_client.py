@@ -138,12 +138,14 @@ class TestHTTPClient:
         mock_response.content = b'{"ok": true}'
 
         # The post method uses request internally, so we need to patch request
-        with patch("httpx.Client.request", return_value=mock_response):
-            with HTTPClient() as client:
-                response = client.post(
-                    "https://api.example.com/v1/test",
-                    json_data={"model": "gpt-4"},
-                )
+        with (
+            patch("httpx.Client.request", return_value=mock_response),
+            HTTPClient() as client,
+        ):
+            response = client.post(
+                "https://api.example.com/v1/test",
+                json_data={"model": "gpt-4"},
+            )
 
         assert response.status_code == 200
 
@@ -175,26 +177,26 @@ class TestHTTPClientErrors:
     def test_timeout_error(self):
         """Test timeout error handling."""
         import httpx
+
         from arcllm.exceptions import TimeoutError
 
         with patch("httpx.Client.request") as mock_request:
             mock_request.side_effect = httpx.TimeoutException("Timed out")
 
-            with HTTPClient(max_retries=1) as client:
-                with pytest.raises(TimeoutError):
-                    client.request("GET", "https://api.example.com/slow")
+            with HTTPClient(max_retries=1) as client, pytest.raises(TimeoutError):
+                client.request("GET", "https://api.example.com/slow")
 
     def test_connection_error(self):
         """Test connection error handling."""
         import httpx
+
         from arcllm.exceptions import ConnectionError
 
         with patch("httpx.Client.request") as mock_request:
             mock_request.side_effect = httpx.ConnectError("Connection refused")
 
-            with HTTPClient(max_retries=1) as client:
-                with pytest.raises(ConnectionError):
-                    client.request("GET", "https://api.example.com/down")
+            with HTTPClient(max_retries=1) as client, pytest.raises(ConnectionError):
+                client.request("GET", "https://api.example.com/down")
 
     def test_retry_on_error(self):
         """Test that retries work."""

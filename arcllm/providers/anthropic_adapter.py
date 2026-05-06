@@ -64,17 +64,20 @@ Changelog (check for API updates):
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import orjson
 
 from arcllm.exceptions import (
     ArcLLMError,
     AuthenticationError,
+    BudgetExceededError,
+    InternalServerError,
     InvalidRequestError,
     ProviderAPIError,
     RateLimitError,
     ResponseParseError,
+    ServiceUnavailableError,
     UnsupportedModelError,
 )
 from arcllm.providers.base import (
@@ -88,6 +91,7 @@ from arcllm.types import (
     Choice,
     ChunkChoice,
     ChunkDelta,
+    Citation,
     EmbeddingResponse,
     FunctionCall,
     Message,
@@ -98,6 +102,45 @@ from arcllm.types import (
 )
 
 __all__ = ["AnthropicAdapter"]
+
+
+_ANTHROPIC_NATIVE_TOOL_PREFIXES = (
+    "web_search_",
+    "code_execution_",
+    "text_editor_",
+    "computer_use_",
+    "bash_",
+)
+
+
+def _is_anthropic_native_tool(tool_type: str) -> bool:
+    """True if ``tool_type`` looks like an Anthropic server-side tool.
+
+    Anthropic versions its server-side tools by date suffix
+    (``web_search_20250305``, ``code_execution_20250825``, etc.), so we
+    match by prefix rather than enumerating each version.
+    """
+    return any(tool_type.startswith(prefix) for prefix in _ANTHROPIC_NATIVE_TOOL_PREFIXES)
+
+
+def _url_to_anthropic_block(block_type: str, url: str) -> dict[str, Any]:
+    """Build an Anthropic ``image`` or ``document`` block from a URL.
+
+    Returns a base64 source for ``data:<media_type>;base64,<...>`` URLs and a
+    URL source for everything else. Falls back to ``application/octet-stream``
+    when the data URL omits a media type (Anthropic accepts the value but the
+    response will likely be a 400 — surface clearly rather than silently).
+    """
+    if url.startswith("data:"):
+        header, _, data = url.partition(",")
+        media_type = "application/octet-stream"
+        if ":" in header and ";" in header:
+            media_type = header.split(";")[0].split(":", 1)[1] or media_type
+        return {
+            "type": block_type,
+            "source": {"type": "base64", "media_type": media_type, "data": data},
+        }
+    return {"type": block_type, "source": {"type": "url", "url": url}}
 
 
 class AnthropicAdapter(BaseAdapter):
@@ -205,52 +248,95 @@ class AnthropicAdapter(BaseAdapter):
         return system_prompt, anthropic_messages
 
     def _convert_multimodal_content(self, content: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert OpenAI multimodal content to Anthropic format."""
+        """Convert OpenAI-shape multimodal content to Anthropic content blocks.
+
+        Handled input shapes:
+
+        - ``{"type": "text", "text": "..."}`` -> Anthropic text block.
+        - ``{"type": "image_url", "image_url": {"url": ...}}`` -> Anthropic
+          ``image`` block. Both ``data:`` URLs (base64) and HTTP URLs are
+          supported.
+        - ``{"type": "input_file", "file": {"data": ..., "media_type": ...}}``
+          (OpenAI Responses-API shape) and the legacy
+          ``{"type": "file", "file": {...}}`` -> Anthropic ``document`` block.
+          Used for PDF input. ``data`` may be either base64 or a
+          ``data:application/pdf;base64,...`` URL; an ``url`` field falls back
+          to the URL source.
+        - Anthropic-native blocks (``{"type": "image"}``,
+          ``{"type": "document"}``, ``{"type": "tool_use"}``,
+          ``{"type": "tool_result"}``) pass through unchanged so callers can
+          construct provider-native shapes when they need to.
+        """
         anthropic_content: list[dict[str, Any]] = []
 
         for part in content:
-            if part.get("type") == "text":
-                anthropic_content.append({"type": "text", "text": part.get("text", "")})
-            elif part.get("type") == "image_url":
-                image_url = part.get("image_url", {})
-                url = image_url.get("url", "")
+            kind = part.get("type")
 
-                if url.startswith("data:"):
-                    # Base64 encoded image
-                    # Format: data:image/jpeg;base64,....
-                    header, data = url.split(",", 1)
-                    media_type = header.split(";")[0].split(":")[1]
+            if kind == "text":
+                anthropic_content.append({"type": "text", "text": part.get("text", "")})
+
+            elif kind == "image_url":
+                image_url_raw: Any = part.get("image_url", {}) or {}
+                if isinstance(image_url_raw, dict):
+                    url_str = str(cast("dict[str, Any]", image_url_raw).get("url", ""))
+                else:
+                    url_str = str(image_url_raw)
+                anthropic_content.append(_url_to_anthropic_block("image", url_str))
+
+            elif kind in {"input_file", "file"}:
+                # OpenAI Responses API uses "input_file"; some clients use "file".
+                file_raw: Any = part.get("file") or part.get("input_file") or {}
+                file_obj: dict[str, Any] = (
+                    cast("dict[str, Any]", file_raw) if isinstance(file_raw, dict) else {}
+                )
+                data = file_obj.get("data")
+                media_type = file_obj.get("media_type") or file_obj.get("mime_type")
+                url_str = str(file_obj.get("url") or file_obj.get("file_url") or "")
+
+                if data and not str(data).startswith("data:"):
+                    # Bare base64 payload + explicit media_type.
                     anthropic_content.append(
                         {
-                            "type": "image",
+                            "type": "document",
                             "source": {
                                 "type": "base64",
-                                "media_type": media_type,
+                                "media_type": media_type or "application/pdf",
                                 "data": data,
                             },
                         }
                     )
-                else:
-                    # URL-based image
+                elif data:
+                    # Already a data: URL.
+                    anthropic_content.append(_url_to_anthropic_block("document", str(data)))
+                elif url_str:
                     anthropic_content.append(
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "url",
-                                "url": url,
-                            },
-                        }
+                        {"type": "document", "source": {"type": "url", "url": url_str}}
                     )
+
+            elif kind in {"image", "document", "tool_use", "tool_result", "thinking"}:
+                # Anthropic-native blocks: pass through verbatim.
+                anthropic_content.append(part)
 
         return anthropic_content
 
     def _convert_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Convert OpenAI tool format to Anthropic format."""
-        anthropic_tools: list[dict[str, Any]] = []
+        """Convert OpenAI tool format to Anthropic format.
 
+        Two cases:
+
+        1. ``{"type": "function", "function": {...}}`` — translated to
+           Anthropic's ``{"name", "description", "input_schema"}`` shape.
+        2. Anthropic-native server-side tools (``web_search_20250305``,
+           ``code_execution_20250825``, ``text_editor_20250728``,
+           ``computer_use_20250124``, etc.) — passed through verbatim. These
+           are identified by a ``type`` that begins with ``web_search_``,
+           ``code_execution_``, ``text_editor_``, or ``computer_use_``.
+        """
+        anthropic_tools: list[dict[str, Any]] = []
         for tool in tools:
-            if tool.get("type") == "function":
-                func = tool.get("function", {})
+            tool_type = tool.get("type", "")
+            if tool_type == "function":
+                func = cast("dict[str, Any]", tool.get("function") or {})
                 anthropic_tools.append(
                     {
                         "name": func.get("name", ""),
@@ -260,7 +346,8 @@ class AnthropicAdapter(BaseAdapter):
                         ),
                     }
                 )
-
+            elif _is_anthropic_native_tool(tool_type):
+                anthropic_tools.append(tool)
         return anthropic_tools
 
     def build_request(
@@ -273,7 +360,7 @@ class AnthropicAdapter(BaseAdapter):
         **kwargs: Any,
     ) -> RequestData:
         """Build Anthropic messages request."""
-        kwargs = self._check_params(drop_params, **kwargs)
+        kwargs = self._check_params(model, drop_params, **kwargs)
 
         # Convert messages
         system_prompt, anthropic_messages = self._convert_messages(messages)
@@ -291,6 +378,18 @@ class AnthropicAdapter(BaseAdapter):
         # Add system prompt if present
         if system_prompt or "system" in kwargs:
             body["system"] = kwargs.get("system") or system_prompt
+
+        # Extended thinking. When set, Anthropic also rejects ``temperature``,
+        # so we drop it pre-emptively (the capability filter already drops it
+        # for known thinking models, but ``thinking_budget`` can be supplied
+        # by the caller as an explicit opt-in).
+        if "thinking_budget" in kwargs and kwargs["thinking_budget"] is not None:
+            body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": int(kwargs["thinking_budget"]),
+            }
+            kwargs.pop("temperature", None)
+            kwargs.pop("top_p", None)
 
         # Add optional parameters
         if "temperature" in kwargs and kwargs["temperature"] is not None:
@@ -352,14 +451,45 @@ class AnthropicAdapter(BaseAdapter):
         content_blocks = resp.get("content", [])
 
         # Extract text content and tool uses
-        # Use list + join for efficient string building
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
+        # Citations are sourced from two places in Anthropic responses:
+        #   - ``web_search_tool_result`` blocks: aggregate result list with
+        #     ``url`` / ``title`` / ``snippet`` per source.
+        #   - ``citations`` annotations on text blocks: per-text-segment
+        #     references back to those sources, with ``start_index`` /
+        #     ``end_index`` offsets into the assistant text.
+        # We collect both into a single list keyed off the URL so each
+        # source appears once with the most informative fields available.
+        citation_index: dict[str, Citation] = {}
 
+        # First pass: high-value text-block citation annotations win because
+        # they carry character offsets back into the assistant text.
         for block in content_blocks:
-            if block.get("type") == "text":
-                text_parts.append(block.get("text", ""))
-            elif block.get("type") == "tool_use":
+            if block.get("type") != "text":
+                continue
+            text_parts.append(block.get("text", ""))
+            annotations = cast("list[Any]", block.get("citations") or [])
+            for ann in annotations:
+                if not isinstance(ann, dict):
+                    continue
+                ann_dict = cast("dict[str, Any]", ann)
+                url = str(ann_dict.get("url") or "")
+                if not url:
+                    continue
+                citation_index[url] = Citation(
+                    url=url,
+                    title=ann_dict.get("title"),
+                    snippet=ann_dict.get("cited_text") or ann_dict.get("encrypted_content"),
+                    start_index=ann_dict.get("start_index") or ann_dict.get("start_char_index"),
+                    end_index=ann_dict.get("end_index") or ann_dict.get("end_char_index"),
+                )
+
+        # Second pass: tool uses + web_search_tool_result fallback (only fills
+        # URLs that the text-block annotations didn't already cover).
+        for block in content_blocks:
+            kind = block.get("type")
+            if kind == "tool_use":
                 tool_calls.append(
                     ToolCall(
                         id=block.get("id", ""),
@@ -370,14 +500,30 @@ class AnthropicAdapter(BaseAdapter):
                         ),
                     )
                 )
+            elif kind == "web_search_tool_result":
+                results = cast("list[Any]", block.get("content") or [])
+                for result in results:
+                    if not isinstance(result, dict):
+                        continue
+                    result_dict = cast("dict[str, Any]", result)
+                    url = str(result_dict.get("url") or "")
+                    if not url or url in citation_index:
+                        continue
+                    citation_index[url] = Citation(
+                        url=url,
+                        title=result_dict.get("title"),
+                        snippet=result_dict.get("snippet") or result_dict.get("page_age"),
+                    )
 
         # Join text parts efficiently
         text_content = "".join(text_parts) if text_parts else None
+        citations = list(citation_index.values()) if citation_index else None
 
         message = Message(
             role=resp.get("role", "assistant"),
             content=text_content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls or None,
+            citations=citations,
         )
 
         # Map Anthropic stop reasons to OpenAI format
@@ -395,12 +541,22 @@ class AnthropicAdapter(BaseAdapter):
             finish_reason=finish_reason,
         )
 
-        # Parse usage
+        # Parse usage. Anthropic separates uncached input tokens from cache
+        # reads/creation; we add the latter into ``prompt_tokens`` so the
+        # OpenAI-shape totals stay correct, and also expose them on the
+        # cache-specific fields so cost tracking can apply the cached rate.
         usage_data = resp.get("usage", {})
+        cache_read = usage_data.get("cache_read_input_tokens")
+        cache_creation = usage_data.get("cache_creation_input_tokens")
+        base_input = usage_data.get("input_tokens", 0)
+        prompt_total = base_input + (cache_read or 0) + (cache_creation or 0)
+        completion_tokens = usage_data.get("output_tokens", 0)
         usage = Usage(
-            prompt_tokens=usage_data.get("input_tokens", 0),
-            completion_tokens=usage_data.get("output_tokens", 0),
-            total_tokens=usage_data.get("input_tokens", 0) + usage_data.get("output_tokens", 0),
+            prompt_tokens=prompt_total,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_total + completion_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_creation,
         )
 
         return ModelResponse(
@@ -539,10 +695,18 @@ class AnthropicAdapter(BaseAdapter):
 
             usage = None
             if usage_data:
+                cache_read = usage_data.get("cache_read_input_tokens")
+                cache_creation = usage_data.get("cache_creation_input_tokens")
+                completion_tokens = usage_data.get("output_tokens", 0)
+                # Anthropic does not include `input_tokens` on delta events
+                # (it's only on `message_start`); the cache fields, however,
+                # do appear here, so we still capture them.
                 usage = Usage(
-                    prompt_tokens=0,  # Not provided in delta
-                    completion_tokens=usage_data.get("output_tokens", 0),
-                    total_tokens=usage_data.get("output_tokens", 0),
+                    prompt_tokens=(cache_read or 0) + (cache_creation or 0),
+                    completion_tokens=completion_tokens,
+                    total_tokens=(cache_read or 0) + (cache_creation or 0) + completion_tokens,
+                    cache_read_input_tokens=cache_read,
+                    cache_creation_input_tokens=cache_creation,
                 )
 
             return StreamChunk(
@@ -580,40 +744,33 @@ class AnthropicAdapter(BaseAdapter):
             message = data.decode("utf-8", errors="replace")
             error_type = ""
 
+        common_kwargs: dict[str, Any] = {
+            "provider": self.provider_name,
+            "status_code": status_code,
+            "request_id": request_id,
+        }
+        message_lower = (message or "").lower()
+
         if status_code == 401:
-            return AuthenticationError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return AuthenticationError(message, **common_kwargs)
+        if status_code == 402:
+            return BudgetExceededError(message, **common_kwargs)
         if status_code == 429:
-            return RateLimitError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            if any(token in message_lower for token in ("quota", "billing", "credit", "budget")):
+                return BudgetExceededError(message, **common_kwargs)
+            return RateLimitError(message, **common_kwargs)
         if status_code == 400:
-            return InvalidRequestError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return InvalidRequestError(message, **common_kwargs)
         if status_code == 404:
-            return UnsupportedModelError(
-                message,
-                provider=self.provider_name,
-                status_code=status_code,
-                request_id=request_id,
-            )
+            return UnsupportedModelError(message, **common_kwargs)
+        if status_code == 503:
+            return ServiceUnavailableError(message, **common_kwargs)
+        if status_code >= 500:
+            return InternalServerError(message, **common_kwargs)
         return ProviderAPIError(
             message,
-            provider=self.provider_name,
-            status_code=status_code,
-            request_id=request_id,
             error_type=error_type,
+            **common_kwargs,
         )
 
     def build_embedding_request(
