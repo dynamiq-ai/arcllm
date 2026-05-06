@@ -298,7 +298,6 @@ class TestLitellmCompatAliases:
         assert arcllm.Timeout is arcllm.exceptions.TimeoutError
         assert arcllm.APIConnectionError is arcllm.exceptions.ConnectionError
 
-
     def test_llm_provider_kwarg_alias(self):
         """Litellm's exception classes accept ``llm_provider=...`` as the
         provider name kwarg. arcllm's ``provider=`` is the canonical
