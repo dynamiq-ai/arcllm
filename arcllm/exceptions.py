@@ -39,6 +39,10 @@ class ArcLLMError(Exception):
         message: str,
         *,
         provider: str | None = None,
+        # Litellm-compat alias: callers migrating from litellm pass
+        # ``llm_provider`` (its kwarg name). If both are given, ``provider``
+        # wins so explicit arcllm code keeps its semantics.
+        llm_provider: str | None = None,
         model: str | None = None,
         status_code: int | None = None,
         request_id: str | None = None,
@@ -46,7 +50,7 @@ class ArcLLMError(Exception):
     ) -> None:
         super().__init__(message)
         self.message = message
-        self.provider = provider
+        self.provider = provider if provider is not None else llm_provider
         self.model = model
         self.status_code = status_code
         self.request_id = request_id

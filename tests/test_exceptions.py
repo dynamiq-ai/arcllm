@@ -297,3 +297,27 @@ class TestLitellmCompatAliases:
         assert arcllm.BadRequestError is arcllm.exceptions.InvalidRequestError
         assert arcllm.Timeout is arcllm.exceptions.TimeoutError
         assert arcllm.APIConnectionError is arcllm.exceptions.ConnectionError
+
+
+    def test_llm_provider_kwarg_alias(self):
+        """Litellm's exception classes accept ``llm_provider=...`` as the
+        provider name kwarg. arcllm's ``provider=`` is the canonical
+        spelling, but ``llm_provider`` is honoured for drop-in compat —
+        downstream callers (notably dynamiq's test fixtures) use it.
+        """
+        from arcllm.exceptions import RateLimitError
+
+        err = RateLimitError(
+            message="Rate limit exceeded",
+            model="gpt-4o-mini",
+            llm_provider="openai",
+        )
+        assert err.provider == "openai"
+        assert err.model == "gpt-4o-mini"
+
+    def test_provider_wins_when_both_kwargs_set(self):
+        """Explicit ``provider=`` overrides ``llm_provider=`` (no contradiction)."""
+        from arcllm.exceptions import ArcLLMError
+
+        err = ArcLLMError("msg", provider="canonical", llm_provider="alias")
+        assert err.provider == "canonical"
