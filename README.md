@@ -15,7 +15,7 @@
   <a href="https://pypi.org/project/arcllm-sdk/"><img src="https://img.shields.io/pypi/v/arcllm-sdk?color=blue&label=PyPI" alt="PyPI"></a>
   <a href="https://pypi.org/project/arcllm-sdk/"><img src="https://img.shields.io/pypi/pyversions/arcllm-sdk" alt="Python"></a>
   <a href="https://github.com/dynamiq-ai/arcllm/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
-  <a href="https://github.com/dynamiq-ai/arcllm/actions"><img src="https://img.shields.io/github/actions/workflow/status/dynamiq-ai/arcllm/ci.yml?branch=main" alt="CI"></a>
+  <a href="https://github.com/dynamiq-ai/arcllm/actions/workflows/ci.yml"><img src="https://github.com/dynamiq-ai/arcllm/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 <p align="center">
@@ -52,7 +52,7 @@ import arcllm
 
 # Simple completion
 response = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
@@ -62,7 +62,7 @@ print(response.choices[0].message.content)
 
 ```python
 stream = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "Write a haiku about coding"}],
     stream=True
 )
@@ -105,7 +105,7 @@ arcllm.completion(model="ollama/llama3.3", messages=messages)
 
 ## Supported providers
 
-24 providers, grouped by surface. The model prefix you pass to `arcllm.completion(model=...)` is shown in the **Prefix** column.
+28 providers, grouped by surface. The model prefix you pass to `arcllm.completion(model=...)` is shown in the **Prefix** column.
 
 ### First-party APIs
 
@@ -117,15 +117,19 @@ arcllm.completion(model="ollama/llama3.3", messages=messages)
 | **Mistral** | `mistral/` | Mistral Large/Medium/Small, Codestral, Pixtral, embeddings |
 | **Cohere** | `cohere/` | Command A/R+/R, Aya Vision, Embed v4, Rerank v3.5 |
 | **DeepSeek** | `deepseek/` | DeepSeek V4 Flash + Pro (chat + reasoner) |
-| **xAI** | `xai/` | Grok-4, Grok-3, Grok-2-vision |
+| **xAI** | `xai/` | Grok-4 / 4.1 / 4.20 / 4.3 family + Grok-3 (legacy) |
 | **Perplexity** | `perplexity/` | Sonar, Sonar Pro, Sonar Reasoning, Deep Research |
 | **Groq** | `groq/` | Llama 3/4, GPT-OSS, Qwen 3 (LPU low-latency) |
 | **Together AI** | `together_ai/` | Llama 4, Qwen 3, DeepSeek V4, Kimi, GLM, MiniMax |
 | **Fireworks AI** | `fireworks_ai/` | DeepSeek V4 Pro, Kimi K2, GLM 5.1, Llama, Qwen |
-| **Cerebras** | `cerebras/` | Llama 3.x, Qwen 3 on CS-3 wafer-scale |
-| **SambaNova** | `sambanova/` | Llama 3.x, Qwen 2.5, DeepSeek on RDU |
-| **DeepInfra** | `deepinfra/` | Llama 3.x, Qwen 2.5, Mixtral (open-weights gateway) |
+| **Cerebras** | `cerebras/` | Llama 3.x, Qwen 3, GPT-OSS on CS-3 wafer-scale |
+| **SambaNova** | `sambanova/` | Llama 3.x / Llama 4, DeepSeek, MiniMax on RDU |
+| **DeepInfra** | `deepinfra/` | Full open-weights catalog: Llama, Qwen, DeepSeek, Phi, Gemma, Kimi |
 | **AI21** | `ai21/` | Jamba 1.5 Large + Mini |
+| **Nebius AI** | `nebius/` | Llama 3.x, Qwen 2.5/3, DeepSeek R1/V3, Mistral, Nemotron |
+| **OVHcloud** | `ovhcloud/` | Llama 3.x, DeepSeek R1, Mistral, Qwen 3 — European GPU cloud |
+| **Z.AI (GLM)** | `zai/` | GLM-4.5 / 4.6 / 5 family by Zhipu AI (incl. vision + reasoning) |
+| **Moonshot AI** | `moonshot/` | Kimi K2.5 / K2.6 / K2-thinking (long-context, multimodal) |
 
 ### Cloud platforms
 
@@ -168,6 +172,10 @@ Every provider reads its key from a documented env var. You can also pass `api_k
 | SambaNova | `SAMBANOVA_API_KEY` | |
 | DeepInfra | `DEEPINFRA_API_KEY` | |
 | AI21 | `AI21_API_KEY` | Jamba family |
+| Nebius AI | `NEBIUS_API_KEY` | |
+| OVHcloud | `OVHCLOUD_API_KEY` | European AI Endpoints |
+| Z.AI (GLM) | `ZAI_API_KEY` | |
+| Moonshot AI | `MOONSHOT_API_KEY` | clamp `temperature` to [0, 1]; multimodal arrays only on Kimi vision/video models |
 | Azure | `AZURE_OPENAI_API_KEY` | + `api_base` + `api_version` per call |
 | AWS Bedrock | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | SigV4-signed; honors `AWS_REGION_NAME` / `AWS_SESSION_TOKEN` |
 | Vertex AI | OAuth (gcloud ADC) | falls back to `GOOGLE_APPLICATION_CREDENTIALS` |
@@ -200,7 +208,7 @@ tools = [{
 }]
 
 response = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
     tools=tools
 )
@@ -214,7 +222,7 @@ if response.choices[0].message.tool_calls:
 
 ```python
 response = arcllm.completion(
-    model="gpt-4o-mini",
+    model="gpt-5.4-mini",
     messages=[{"role": "user", "content": "Generate a user profile"}],
     response_format={
         "type": "json_schema",
@@ -361,8 +369,9 @@ for r in response.results:
     print(f"#{r.index}  score={r.relevance_score:.3f}  {r.document}")
 ```
 
-`arcllm.arerank(...)` is the async equivalent. Cohere is the reference
-implementation in 0.4 — Voyage / Bedrock / Jina rerank land in 0.5.
+`arcllm.arerank(...)` is the async equivalent. Cohere is the supported
+rerank provider; other adapters raise `UnsupportedModelError` when
+called through this surface.
 
 ### 🖼️ Image generation
 

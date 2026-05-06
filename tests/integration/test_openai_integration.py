@@ -190,19 +190,15 @@ class TestOpenAIIntegration(IntegrationTestBase):
     - Error handling
     - Cost calculation
 
-    As of January 2026:
-    - GPT-5.2 is the latest flagship model (released December 11, 2025)
-    - GPT-4o is being retired on February 16, 2026
-    - GPT-3.5-turbo is deprecated
-
-    See: https://platform.openai.com/docs/models
+    See https://platform.openai.com/docs/models for the canonical model
+    list — arcllm's manifest under tmp/model_manifests/openai.json is
+    refreshed monthly by the model-drift workflow.
     """
 
     PROVIDER = "openai"
     ENV_VAR = "OPENAI_API_KEY"
-    # Use gpt-4o-mini for primary tests (cheap, fast, full parameter support)
-    # GPT-5 series models have restricted parameters like o1
-    # Available models as of Jan 2026: gpt-5.2, gpt-5.1, gpt-5, gpt-4.1, gpt-4o
+    # Primary tests use gpt-4o-mini — cheap, fast, full parameter support
+    # (the o-series and GPT-5.x reasoning models drop temperature/top_p).
     PRIMARY_MODEL = "gpt-4o-mini"
     EMBEDDING_MODEL = "text-embedding-3-small"
     SUPPORTS_TOOLS = True

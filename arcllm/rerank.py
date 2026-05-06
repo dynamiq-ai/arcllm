@@ -1,18 +1,15 @@
 """
 Rerank public API.
 
-Drop-in for ``litellm.rerank``. Routes through the same provider registry as
-chat-completion calls; each adapter declares whether it supports reranking by
-overriding :meth:`arcllm.providers.base.BaseAdapter.build_rerank_request` /
+Routes through the same provider registry as chat-completion calls;
+each adapter declares whether it supports reranking by overriding
+:meth:`arcllm.providers.base.BaseAdapter.build_rerank_request` /
 ``parse_rerank_response``.
 
-Provider coverage in 0.4.0:
-
-- **Cohere** (``rerank-v3.5``, ``rerank-multilingual-v3.0``,
-  ``rerank-v4.0``) — primary surface used by dynamiq's ``CohereReranker``.
-
-Voyage / Bedrock / Jina rerank can be added in 0.4.x as additional adapters
-override these two methods.
+Cohere is the supported provider — ``cohere/rerank-v3.5``,
+``cohere/rerank-multilingual-v3.0``, ``cohere/rerank-v4.0``. Other
+adapters raise :class:`UnsupportedModelError` when called via this
+surface.
 """
 
 from __future__ import annotations

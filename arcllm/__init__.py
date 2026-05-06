@@ -190,7 +190,7 @@ from arcllm.pricing import (
     get_model_pricing,
 )
 
-# Rerank surface (Cohere in 0.4; Voyage / Bedrock / Jina to follow)
+# Rerank surface
 from arcllm.rerank import arerank, rerank
 
 # Token counting (heuristic by default; tiktoken-precise with `arcllm-sdk[tokenize]`)
