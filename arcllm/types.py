@@ -39,11 +39,12 @@ class _DictLike:
 
     __slots__ = ()
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: object) -> Any:
+        # Accept ``object`` rather than ``str`` because ``dict()`` may
+        # probe with int indices when the mapping protocol isn't
+        # recognised. Non-str keys raise KeyError so callers see a
+        # clean error path.
         if not isinstance(key, str):
-            # ``dict()`` falls back to integer indexing when the mapping
-            # protocol isn't recognised; reject those cleanly so the
-            # caller's error message points at the actual problem.
             raise KeyError(key)
         try:
             return getattr(self, key)
@@ -56,7 +57,9 @@ class _DictLike:
         # canonical Struct constructor and gets full type checking.
         setattr(self, key, value)
 
-    def __contains__(self, key: str) -> bool:
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
         return hasattr(self, key) and getattr(self, key) is not None
 
     def __iter__(self) -> Any:
@@ -306,7 +309,7 @@ class ModelResponse(_DictLike, msgspec.Struct):
     - response.model_extra["usage"]
     """
 
-    id: str
+    id: str = ""
     object: str = "chat.completion"
     created: int = 0
     model: str = ""
@@ -389,7 +392,7 @@ class ChunkChoice(_DictLike, msgspec.Struct):
 class StreamChunk(_DictLike, msgspec.Struct):
     """A single chunk in a streaming response."""
 
-    id: str
+    id: str = ""
     object: str = "chat.completion.chunk"
     created: int = 0
     model: str = ""
@@ -547,8 +550,8 @@ class ImageData(_DictLike, msgspec.Struct):
 class ImageResponse(_DictLike, msgspec.Struct):
     """Response from an image generation / variation / edit request."""
 
-    created: int
-    data: list[ImageData]
+    created: int = 0
+    data: list[ImageData] = []
     model: str = ""
 
     def model_dump(self) -> dict[str, Any]:
