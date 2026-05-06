@@ -67,6 +67,38 @@ PROVIDERS: list[ProviderSpec] = [
     ProviderSpec("groq", "GROQ_API_KEY", "llama-3.1-8b-instant", None),
     ProviderSpec("deepseek", "DEEPSEEK_API_KEY", "deepseek-v4-flash", None),
     ProviderSpec("cohere", "COHERE_API_KEY", "command-r-08-2024", "embed-v4.0"),
+    # 0.4 production push: 8 OpenAI-compat / cloud providers wired in CI.
+    ProviderSpec("xai", "XAI_API_KEY", "grok-3-mini", None),
+    ProviderSpec("openrouter", "OPENROUTER_API_KEY", "openai/gpt-4o-mini", None),
+    ProviderSpec("cerebras", "CEREBRAS_API_KEY", "llama3.1-8b", None),
+    ProviderSpec("sambanova", "SAMBANOVA_API_KEY", "Meta-Llama-3.3-70B-Instruct", None),
+    ProviderSpec(
+        "deepinfra",
+        "DEEPINFRA_API_KEY",
+        "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        None,
+    ),
+    ProviderSpec(
+        "nvidia_nim",
+        "NVIDIA_NIM_API_KEY",
+        "meta/llama-3.1-8b-instruct",
+        None,
+    ),
+    # Bedrock + WatsonX use multi-secret auth; per-provider integration files
+    # cover the more elaborate flows. The matrix here exercises a single
+    # cheap chat call to surface obvious wire-format regressions.
+    ProviderSpec(
+        "bedrock",
+        "AWS_ACCESS_KEY_ID",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        None,
+    ),
+    ProviderSpec(
+        "watsonx",
+        "WATSONX_API_KEY",
+        "meta-llama/llama-3-3-70b-instruct",
+        None,
+    ),
 ]
 
 
