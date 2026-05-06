@@ -11,8 +11,10 @@ from typing import Any
 
 __all__ = [
     "APIConnectionError",
+    "APIError",
     "ArcLLMError",
     "AuthenticationError",
+    "BadRequestError",
     "BudgetExceededError",
     "ConnectionError",
     "ContentFilterError",
@@ -335,3 +337,8 @@ def map_status_code_to_exception(
 # class objects.
 Timeout = TimeoutError
 APIConnectionError = ConnectionError
+# litellm names ``APIError`` and ``BadRequestError`` map to arcllm's
+# ``ProviderAPIError`` (the broader provider-error base) and
+# ``InvalidRequestError`` (400-class semantics) respectively.
+APIError = ProviderAPIError
+BadRequestError = InvalidRequestError
