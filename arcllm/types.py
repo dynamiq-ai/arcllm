@@ -194,7 +194,7 @@ class Citation(_DictLike, msgspec.Struct):
 class Message(_DictLike, msgspec.Struct):
     """A message in a completion response."""
 
-    role: str
+    role: str = "assistant"
     content: str | None = None
     tool_calls: list[ToolCall] | None = None
     function_call: FunctionCall | None = None  # Legacy, prefer tool_calls
@@ -276,8 +276,8 @@ class Usage(_DictLike, msgspec.Struct):
 class Choice(_DictLike, msgspec.Struct):
     """A single choice in a completion response."""
 
-    index: int
-    message: Message
+    index: int = 0
+    message: Message = msgspec.field(default_factory=Message)
     finish_reason: str | None = None
     logprobs: dict[str, Any] | None = None
 
@@ -313,7 +313,11 @@ class ModelResponse(_DictLike, msgspec.Struct):
     object: str = "chat.completion"
     created: int = 0
     model: str = ""
-    choices: list[Choice] = []
+    # Default is a single empty Choice — matches litellm's
+    # ``ModelResponse()`` shape so test fixtures that do
+    # ``response.choices[0].message.content = ...`` keep working.
+    # Real provider responses always overwrite this list.
+    choices: list[Choice] = msgspec.field(default_factory=lambda: [Choice()])
     usage: Usage | None = None
     system_fingerprint: str | None = None
     # Extra fields for debugging/compatibility
@@ -371,8 +375,8 @@ class ChunkDelta(_DictLike, msgspec.Struct):
 class ChunkChoice(_DictLike, msgspec.Struct):
     """A single choice in a streaming chunk."""
 
-    index: int
-    delta: ChunkDelta
+    index: int = 0
+    delta: ChunkDelta = msgspec.field(default_factory=ChunkDelta)
     finish_reason: str | None = None
     logprobs: dict[str, Any] | None = None
 
@@ -396,7 +400,9 @@ class StreamChunk(_DictLike, msgspec.Struct):
     object: str = "chat.completion.chunk"
     created: int = 0
     model: str = ""
-    choices: list[ChunkChoice] = []
+    # Same litellm-compat shape as ModelResponse: a default-empty choice
+    # so ``StreamChunk()['choices'][0]['delta']`` works in fixtures.
+    choices: list[ChunkChoice] = msgspec.field(default_factory=lambda: [ChunkChoice()])
     usage: Usage | None = None  # Present in final chunk if include_usage=True
     system_fingerprint: str | None = None
 
