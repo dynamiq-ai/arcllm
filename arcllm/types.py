@@ -427,11 +427,17 @@ class EmbeddingData(msgspec.Struct):
 
 
 class EmbeddingResponse(msgspec.Struct):
-    """Response from an embedding request."""
+    """Response from an embedding request.
 
-    model: str
-    data: list[EmbeddingData]
-    usage: EmbeddingUsage
+    All fields default — matches the litellm-compat contract where test
+    fixtures construct ``EmbeddingResponse()`` with no args and populate
+    fields after the fact. Adapters always set every field on real
+    responses, so this is purely for caller ergonomics.
+    """
+
+    model: str = ""
+    data: list[EmbeddingData] = []
+    usage: EmbeddingUsage | None = None
     object: str = "list"
 
     def model_dump(self) -> dict[str, Any]:
@@ -439,7 +445,7 @@ class EmbeddingResponse(msgspec.Struct):
         return {
             "model": self.model,
             "data": [d.model_dump() for d in self.data],
-            "usage": self.usage.model_dump(),
+            "usage": self.usage.model_dump() if self.usage is not None else None,
             "object": self.object,
         }
 
