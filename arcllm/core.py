@@ -30,6 +30,7 @@ from arcllm.types import (
     ModelResponse,
     StreamChunk,
     StreamingResponse,
+    ThinkingBlock,
     ToolCall,
     Usage,
 )
@@ -548,6 +549,10 @@ def stream_chunk_builder(
     # Use specialized structure for better performance
     choice_roles: dict[int, str | None] = {}
     choice_content: dict[int, list[str]] = {}
+    choice_reasoning: dict[int, list[str]] = {}
+    # Anthropic-style: per-choice ordered list of (thinking_text, signature)
+    # blocks rebuilt from the stream so callers can replay them as input.
+    choice_thinking_blocks: dict[int, list[list[str]]] = {}
     choice_tool_calls: dict[
         int, dict[int, list[Any]]
     ] = {}  # idx -> tc_idx -> [id, type, name_parts, arg_parts]
@@ -571,6 +576,8 @@ def stream_chunk_builder(
             if idx not in choice_content:
                 choice_roles[idx] = None
                 choice_content[idx] = []
+                choice_reasoning[idx] = []
+                choice_thinking_blocks[idx] = []
                 choice_tool_calls[idx] = {}
                 choice_finish[idx] = None
                 choice_logprobs[idx] = None
@@ -583,6 +590,26 @@ def stream_chunk_builder(
             delta_content = delta.content
             if delta_content:
                 choice_content[idx].append(delta_content)
+
+            # Reasoning (DeepSeek/GLM/o-series style — flat string deltas).
+            delta_reasoning = delta.reasoning_content
+            if delta_reasoning:
+                choice_reasoning[idx].append(delta_reasoning)
+
+            # Anthropic-style thinking deltas — group by current open block.
+            # A new block starts whenever a thinking delta arrives after a
+            # signature delta (or first thinking delta of the stream).
+            delta_thinking = delta.thinking
+            delta_signature = delta.signature
+            if delta_thinking is not None or delta_signature is not None:
+                blocks = choice_thinking_blocks[idx]
+                if not blocks or (blocks and blocks[-1][1]):
+                    # Last block is closed (has signature) — start a new one.
+                    blocks.append(["", ""])
+                if delta_thinking:
+                    blocks[-1][0] += delta_thinking
+                if delta_signature:
+                    blocks[-1][1] = delta_signature
 
             choice_finish_reason = choice.finish_reason
             if choice_finish_reason:
@@ -645,10 +672,34 @@ def stream_chunk_builder(
         content_parts = choice_content[idx]
         content = "".join(content_parts) if content_parts else None
 
+        reasoning_parts = choice_reasoning[idx]
+        reasoning_content = "".join(reasoning_parts) if reasoning_parts else None
+
+        thinking_blocks_assembled: list[ThinkingBlock] | None = None
+        if choice_thinking_blocks[idx]:
+            thinking_blocks_assembled = [
+                ThinkingBlock(
+                    type="thinking",
+                    thinking=text,
+                    signature=sig or None,
+                )
+                for text, sig in choice_thinking_blocks[idx]
+                if text or sig
+            ] or None
+            # Fallback to populate the flat surface when only thinking blocks
+            # arrived (Anthropic) — concatenate their text so callers reading
+            # ``reasoning_content`` see the same string regardless of provider.
+            if reasoning_content is None and thinking_blocks_assembled is not None:
+                reasoning_content = (
+                    "".join(b.thinking or "" for b in thinking_blocks_assembled) or None
+                )
+
         message = Message(
             role=choice_roles[idx] or "assistant",
             content=content,
             tool_calls=tool_calls or None,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks_assembled,
         )
 
         choices.append(

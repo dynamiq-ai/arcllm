@@ -97,6 +97,7 @@ from arcllm.types import (
     Message,
     ModelResponse,
     StreamChunk,
+    ThinkingBlock,
     ToolCall,
     Usage,
 )
@@ -450,9 +451,11 @@ class AnthropicAdapter(BaseAdapter):
         now = int(time.time())
         content_blocks = resp.get("content", [])
 
-        # Extract text content and tool uses
+        # Extract text content, tool uses, and thinking blocks
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
+        thinking_blocks: list[ThinkingBlock] = []
+        thinking_text_parts: list[str] = []
         # Citations are sourced from two places in Anthropic responses:
         #   - ``web_search_tool_result`` blocks: aggregate result list with
         #     ``url`` / ``title`` / ``snippet`` per source.
@@ -485,11 +488,29 @@ class AnthropicAdapter(BaseAdapter):
                     end_index=ann_dict.get("end_index") or ann_dict.get("end_char_index"),
                 )
 
-        # Second pass: tool uses + web_search_tool_result fallback (only fills
-        # URLs that the text-block annotations didn't already cover).
+        # Second pass: tool uses, thinking blocks, and web_search_tool_result
+        # fallback (only fills URLs the text-block annotations didn't cover).
         for block in content_blocks:
             kind = block.get("type")
-            if kind == "tool_use":
+            if kind == "thinking":
+                thinking_text = block.get("thinking", "")
+                thinking_blocks.append(
+                    ThinkingBlock(
+                        type="thinking",
+                        thinking=thinking_text,
+                        signature=block.get("signature"),
+                    )
+                )
+                if thinking_text:
+                    thinking_text_parts.append(thinking_text)
+            elif kind == "redacted_thinking":
+                thinking_blocks.append(
+                    ThinkingBlock(
+                        type="redacted_thinking",
+                        data=block.get("data"),
+                    )
+                )
+            elif kind == "tool_use":
                 tool_calls.append(
                     ToolCall(
                         id=block.get("id", ""),
@@ -518,12 +539,15 @@ class AnthropicAdapter(BaseAdapter):
         # Join text parts efficiently
         text_content = "".join(text_parts) if text_parts else None
         citations = list(citation_index.values()) if citation_index else None
+        reasoning_content = "".join(thinking_text_parts) if thinking_text_parts else None
 
         message = Message(
             role=resp.get("role", "assistant"),
             content=text_content,
             tool_calls=tool_calls or None,
             citations=citations,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks or None,
         )
 
         # Map Anthropic stop reasons to OpenAI format
@@ -617,6 +641,21 @@ class AnthropicAdapter(BaseAdapter):
                         )
                     ],
                 )
+            if block.get("type") == "thinking":
+                # Anthropic emits an empty thinking block first, then a
+                # series of thinking_delta events with the text, then a
+                # signature_delta with the cryptographic signature.
+                return StreamChunk(
+                    id="",
+                    model=model,
+                    choices=[
+                        ChunkChoice(
+                            index=0,
+                            delta=ChunkDelta(thinking=block.get("thinking", "")),
+                            finish_reason=None,
+                        )
+                    ],
+                )
             if block.get("type") == "tool_use":
                 # Start of tool use
                 return StreamChunk(
@@ -645,7 +684,8 @@ class AnthropicAdapter(BaseAdapter):
 
         elif event_type == "content_block_delta":
             delta = event.get("delta", {})
-            if delta.get("type") == "text_delta":
+            delta_type = delta.get("type")
+            if delta_type == "text_delta":
                 return StreamChunk(
                     id="",
                     model=model,
@@ -653,6 +693,38 @@ class AnthropicAdapter(BaseAdapter):
                         ChunkChoice(
                             index=0,
                             delta=ChunkDelta(content=delta.get("text", "")),
+                            finish_reason=None,
+                        )
+                    ],
+                )
+            if delta_type == "thinking_delta":
+                # Surface as both ``thinking`` (matches Anthropic wire shape
+                # for round-trip) and ``reasoning_content`` (so callers using
+                # the unified surface can stream thinking text without a
+                # provider-specific code path).
+                thinking_text = delta.get("thinking", "")
+                return StreamChunk(
+                    id="",
+                    model=model,
+                    choices=[
+                        ChunkChoice(
+                            index=0,
+                            delta=ChunkDelta(
+                                thinking=thinking_text,
+                                reasoning_content=thinking_text,
+                            ),
+                            finish_reason=None,
+                        )
+                    ],
+                )
+            if delta_type == "signature_delta":
+                return StreamChunk(
+                    id="",
+                    model=model,
+                    choices=[
+                        ChunkChoice(
+                            index=0,
+                            delta=ChunkDelta(signature=delta.get("signature", "")),
                             finish_reason=None,
                         )
                     ],

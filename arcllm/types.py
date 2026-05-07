@@ -187,6 +187,44 @@ class Citation(_DictLike, msgspec.Struct):
 
 
 # =============================================================================
+# Reasoning / Thinking Types
+# =============================================================================
+
+
+class ThinkingBlock(_DictLike, msgspec.Struct):
+    """A chain-of-thought block from a reasoning-capable model.
+
+    Anthropic's extended-thinking feature returns thinking as structured
+    content blocks (``type: "thinking"`` with a ``signature`` for replay,
+    or ``type: "redacted_thinking"`` with opaque ``data``). Preserving the
+    block shape — instead of flattening to a string — lets callers send
+    the thinking back as part of the conversation history without losing
+    the signature, which is required for tool-use round trips.
+
+    For providers that emit thinking as a flat string (DeepSeek-R1, GLM,
+    Groq DeepSeek/Qwen-thinking, Gemini with ``includeThoughts=true``)
+    we populate :attr:`Message.reasoning_content` directly instead.
+    """
+
+    type: Literal["thinking", "redacted_thinking"] = "thinking"
+    thinking: str | None = None
+    signature: str | None = None
+    # Anthropic-specific: opaque payload for ``redacted_thinking`` blocks.
+    data: str | None = None
+
+    def model_dump(self) -> dict[str, Any]:
+        """Return dict representation for serialization."""
+        result: dict[str, Any] = {"type": self.type}
+        if self.thinking is not None:
+            result["thinking"] = self.thinking
+        if self.signature is not None:
+            result["signature"] = self.signature
+        if self.data is not None:
+            result["data"] = self.data
+        return result
+
+
+# =============================================================================
 # Message Types
 # =============================================================================
 
@@ -204,6 +242,14 @@ class Message(_DictLike, msgspec.Struct):
     # responses; an empty list means "the provider was asked to ground but
     # returned no sources" (rare).
     citations: list[Citation] | None = None
+    # Chain-of-thought / extended-thinking output from reasoning models.
+    # ``reasoning_content`` is the unified flat-string surface (populated
+    # by DeepSeek-R1, GLM-4.5+, Gemini 2.5+ with includeThoughts, OpenAI
+    # o-series via chat/completions when supported, etc.). For Anthropic
+    # extended thinking we also populate ``thinking_blocks`` so callers
+    # can send the structured form back with signatures intact.
+    reasoning_content: str | None = None
+    thinking_blocks: list[ThinkingBlock] | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Return dict representation for serialization."""
@@ -218,6 +264,10 @@ class Message(_DictLike, msgspec.Struct):
             result["refusal"] = self.refusal
         if self.citations is not None:
             result["citations"] = [c.model_dump() for c in self.citations]
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
+        if self.thinking_blocks is not None:
+            result["thinking_blocks"] = [b.model_dump() for b in self.thinking_blocks]
         return result
 
 
@@ -372,6 +422,13 @@ class ChunkDelta(_DictLike, msgspec.Struct):
     # for grounded providers — Perplexity, Gemini grounding, Anthropic
     # web-search). None on intermediate chunks.
     citations: list[Citation] | None = None
+    # Reasoning deltas. ``reasoning_content`` is the flat-string surface
+    # (DeepSeek-R1, GLM, Groq, etc.). ``thinking`` carries the per-chunk
+    # text of an Anthropic ``thinking_delta`` event; the matching
+    # ``signature`` lands in the trailing ``signature_delta``.
+    reasoning_content: str | None = None
+    thinking: str | None = None
+    signature: str | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Return dict representation for serialization."""
@@ -386,6 +443,12 @@ class ChunkDelta(_DictLike, msgspec.Struct):
             result["function_call"] = self.function_call
         if self.citations is not None:
             result["citations"] = [c.model_dump() for c in self.citations]
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
+        if self.thinking is not None:
+            result["thinking"] = self.thinking
+        if self.signature is not None:
+            result["signature"] = self.signature
         return result
 
 

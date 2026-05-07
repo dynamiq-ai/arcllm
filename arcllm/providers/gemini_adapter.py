@@ -420,11 +420,19 @@ class GeminiAdapter(BaseAdapter):
 
             # Use list + join for efficient string building
             text_parts: list[str] = []
+            thought_parts: list[str] = []
             tool_calls: list[ToolCall] = []
 
             for part in parts:
                 if "text" in part:
-                    text_parts.append(part["text"])
+                    # Gemini marks chain-of-thought parts with ``thought: true``
+                    # when the request set ``thinkingConfig.includeThoughts``.
+                    # We split those out into ``reasoning_content`` so callers
+                    # don't have to filter them out of the answer text.
+                    if part.get("thought"):
+                        thought_parts.append(part["text"])
+                    else:
+                        text_parts.append(part["text"])
                 elif "functionCall" in part:
                     fc = part["functionCall"]
                     tool_calls.append(
@@ -439,12 +447,14 @@ class GeminiAdapter(BaseAdapter):
                     )
 
             text_content = "".join(text_parts) if text_parts else None
+            reasoning_content = "".join(thought_parts) if thought_parts else None
             citations = _extract_grounding_citations(candidate)
             message = Message(
                 role="assistant",
                 content=text_content,
                 tool_calls=tool_calls or None,
                 citations=citations,
+                reasoning_content=reasoning_content,
             )
 
             # Map finish reason
@@ -507,11 +517,15 @@ class GeminiAdapter(BaseAdapter):
 
             # Use list + join for efficient string building
             text_parts: list[str] = []
+            thought_parts: list[str] = []
             tool_call_deltas: list[dict[str, Any]] = []
 
             for part in parts:
                 if "text" in part:
-                    text_parts.append(part["text"])
+                    if part.get("thought"):
+                        thought_parts.append(part["text"])
+                    else:
+                        text_parts.append(part["text"])
                 elif "functionCall" in part:
                     fc = part["functionCall"]
                     tool_call_deltas.append(
@@ -527,9 +541,11 @@ class GeminiAdapter(BaseAdapter):
                     )
 
             text_content = "".join(text_parts) if text_parts else None
+            reasoning_content = "".join(thought_parts) if thought_parts else None
             delta = ChunkDelta(
                 content=text_content,
                 tool_calls=tool_call_deltas or None,
+                reasoning_content=reasoning_content,
             )
 
             finish_reason = None

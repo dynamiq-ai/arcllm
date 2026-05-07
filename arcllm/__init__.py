@@ -69,7 +69,7 @@ See README.md for complete documentation.
 
 from __future__ import annotations
 
-__version__ = "0.4.8"
+__version__ = "0.4.9"
 __all__ = [
     "APIConnectionError",
     "APIError",
@@ -102,6 +102,7 @@ __all__ = [
     "ServiceUnavailableError",
     "StreamChunk",
     "StreamingResponse",
+    "ThinkingBlock",
     "Timeout",
     "TimeoutError",
     "ToolCall",
@@ -224,6 +225,7 @@ from arcllm.types import (
     RerankResult,
     StreamChunk,
     StreamingResponse,
+    ThinkingBlock,
     ToolCall,
     Usage,
 )
