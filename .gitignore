@@ -124,3 +124,8 @@ vendor/
 
 # Working tmp dir for model manifests, agent outputs, scratch JSON
 tmp/
+
+# External services occasionally cloned into the worktree for local
+# integration smoke checks (e.g. catalyst). Never tracked here.
+/catalyst/
+/catalyst-*/
