@@ -36,6 +36,7 @@ ArcLLM ships a single unified, OpenAI-compatible surface across every major LLM 
 - **OpenAI-compatible API** so existing client code keeps working.
 - **Sync + async, streaming, tools, structured output, vision, embeddings** in one library.
 - **Built-in cost + capability tracking** for every supported model.
+- **Drop-in for litellm** — the public surface (`completion`, `acompletion`, exception classes, `ModelResponse`, `EmbeddingResponse`, `Delta`, `token_counter`, `cost_per_token`, `get_model_info`, `get_supported_openai_params`, `image_generation`, `rerank`) matches name-for-name. Most projects swap with a single-import change.
 
 Built for developers who want **speed**, **simplicity**, and **reliability** when working with LLMs.
 
@@ -44,6 +45,38 @@ Built for developers who want **speed**, **simplicity**, and **reliability** whe
 ```bash
 pip install arcllm-sdk
 ```
+
+## Migrating from litellm
+
+ArcLLM's public surface mirrors litellm's, so adopting it in an existing
+codebase is usually one search-and-replace:
+
+```python
+# Before
+from litellm import completion, acompletion
+from litellm.exceptions import RateLimitError, BadRequestError
+
+# After
+from arcllm import completion, acompletion
+from arcllm.exceptions import RateLimitError, BadRequestError
+```
+
+Submodule paths map as follows:
+
+| litellm path                                | arcllm path                            |
+|---                                          |---                                     |
+| `from litellm import X`                     | `from arcllm import X`                 |
+| `from litellm.exceptions import …`          | `from arcllm.exceptions import …`      |
+| `from litellm.types.utils import Delta, ModelResponse, EmbeddingResponse` | `from arcllm.types import Delta, ModelResponse, EmbeddingResponse` |
+| `from litellm.utils import supports_pdf_input` | `from arcllm import supports_pdf_input` |
+| `import litellm` (then `litellm.X(...)`)    | `import arcllm` (then `arcllm.X(...)`) |
+
+Validated against the open-source [`dynamiq`](https://github.com/dynamiq-ai/dynamiq)
+agentic framework: 1148-test unit suite + 986-test integration suite pass
+with arcllm in litellm's place. Exception classes accept both arcllm's
+keyword-only construction *and* litellm's positional shape — e.g.
+`BadRequestError("msg", "gpt-4o", "openai")` resolves correctly via a
+`SUPPORTED_PROVIDERS` heuristic, so existing call patterns keep working.
 
 ## Quick Start
 
@@ -105,7 +138,7 @@ arcllm.completion(model="ollama/llama3.3", messages=messages)
 
 ## Supported providers
 
-28 providers, grouped by surface. The model prefix you pass to `arcllm.completion(model=...)` is shown in the **Prefix** column.
+30 provider adapters, grouped by surface. The model prefix you pass to `arcllm.completion(model=...)` is shown in the **Prefix** column.
 
 ### First-party APIs
 
@@ -304,6 +337,28 @@ arcllm.completion(
     include_thoughts=True,
 )
 ```
+
+Reasoning output is normalised into a single, cross-provider surface on
+the response message:
+
+```python
+response = arcllm.completion(
+    model="anthropic/claude-sonnet-4-5",
+    messages=[{"role": "user", "content": "Solve 12 * 7 step by step."}],
+    thinking_budget=2048,
+    max_tokens=512,
+)
+msg = response.choices[0].message
+print(msg.reasoning_content)   # flat-string CoT, populated for every reasoning provider
+print(msg.thinking_blocks)     # Anthropic's structured form (signatures preserved)
+```
+
+`reasoning_content` is filled by OpenAI o-series, GPT-5 hybrid, DeepSeek-R1,
+GLM-4.5+, Anthropic extended thinking, Gemini 2.5 with `include_thoughts`,
+Groq DeepSeek/Qwen, Cerebras Qwen-thinking, Together / Fireworks DeepSeek-R1,
+and Moonshot Kimi-thinking. `thinking_blocks` carries Anthropic's structured
+blocks (with signatures intact for tool-use round-trips). Streaming deltas
+expose the same fields per chunk.
 
 ### 🔎 Citations from grounded providers
 
