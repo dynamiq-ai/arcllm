@@ -159,6 +159,14 @@ def token_counter(
     models when ``arcllm-sdk[tokenize]`` is installed, otherwise a chars/4
     heuristic with a one-time warning.
 
+    For ``messages`` lists, follows OpenAI's published per-message
+    overhead formula (3 tokens per message + 3 priming tokens for the
+    final assistant turn) so counts are comparable to litellm and to
+    OpenAI's own ``tiktoken`` cookbook examples. Without the overhead,
+    arcllm would systematically undercount and downstream callers
+    (notably dynamiq's history-summarisation logic) would preserve
+    more messages than the model's context window can actually hold.
+
     Raises ``ValueError`` if both ``messages`` and ``text`` are missing.
     """
     if messages is None and text is None:
@@ -166,11 +174,42 @@ def token_counter(
     if messages is not None and text is not None:
         raise ValueError("token_counter accepts `messages` or `text`, not both")
 
-    payload = text if text is not None else _flatten_messages(messages or [])
+    if text is not None:
+        count = _count_text_with_tiktoken(text, model)
+        if count is not None:
+            return count
+        _warn_heuristic_once(model)
+        return _heuristic_count(text)
 
-    count = _count_text_with_tiktoken(payload, model)
-    if count is not None:
-        return count
-
-    _warn_heuristic_once(model)
-    return _heuristic_count(payload)
+    # Messages path — count each field separately and add per-message
+    # overhead so the total matches OpenAI's chat-completion accounting
+    # (and litellm's, which uses the same formula).
+    msgs = messages or []
+    per_message = 3
+    per_name = 1
+    total = 0
+    for msg in msgs:
+        total += per_message
+        for key, value in msg.items():
+            if value is None:
+                continue
+            if isinstance(value, str):
+                field_count = _count_text_with_tiktoken(value, model)
+                if field_count is None:
+                    field_count = _heuristic_count(value)
+                total += field_count
+            else:
+                # Non-string fields (content arrays for vision, tool_calls
+                # JSON, etc.) — flatten to text and count.
+                flattened = _flatten_messages([{key: value}])
+                field_count = _count_text_with_tiktoken(flattened, model)
+                if field_count is None:
+                    field_count = _heuristic_count(flattened)
+                total += field_count
+            if key == "name":
+                total += per_name
+    # Priming tokens for the assistant's reply.
+    total += 3
+    if _count_text_with_tiktoken("", model) is None:
+        _warn_heuristic_once(model)
+    return total
