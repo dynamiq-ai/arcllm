@@ -5,6 +5,7 @@ Tests for arcllm.exceptions module.
 from arcllm.exceptions import (
     ArcLLMError,
     AuthenticationError,
+    BadRequestError,
     BudgetExceededError,
     ContentFilterError,
     InternalServerError,
@@ -320,3 +321,59 @@ class TestLitellmCompatAliases:
 
         err = ArcLLMError("msg", provider="canonical", llm_provider="alias")
         assert err.provider == "canonical"
+
+
+class TestBadRequestErrorPositionalDisambiguation:
+    """``BadRequestError`` accepts both arcllm's ``(message, provider, model)``
+    and litellm's ``(message, model, llm_provider)`` positional shapes. The
+    second positional is ambiguous between *provider* and *model*; the
+    docstring promises a ``SUPPORTED_PROVIDERS`` lookup as tiebreaker.
+
+    These tests pin the heuristic so neither shape silently corrupts the
+    other when callers pass only some of the positionals.
+    """
+
+    def test_two_positionals_arcllm_shape_provider_then_model(self):
+        """``(message, provider, model)`` — arcllm's documented order."""
+        err = BadRequestError("Bad input", "openai", "gpt-4o-mini")
+        assert err.provider == "openai"
+        assert err.model == "gpt-4o-mini"
+
+    def test_two_positionals_litellm_shape_model_then_provider(self):
+        """``(message, model, llm_provider)`` — litellm's order. The model
+        slot ("gpt-4o-mini") is not a provider name, so the heuristic flips
+        the assignment."""
+        err = BadRequestError("Bad input", "gpt-4o-mini", "openai")
+        assert err.provider == "openai"
+        assert err.model == "gpt-4o-mini"
+
+    def test_single_positional_provider_name_assigned_to_provider(self):
+        """A bare provider name as the second positional is a provider —
+        matches arcllm's ``(message, provider)`` form."""
+        err = BadRequestError("Bad input", "anthropic")
+        assert err.provider == "anthropic"
+        assert err.model is None
+
+    def test_single_positional_model_name_assigned_to_model(self):
+        """A model name as the second positional is litellm's
+        ``BadRequestError(message, model)`` shape — must NOT be miscategorised
+        as provider. This was the bug: the SUPPORTED_PROVIDERS heuristic was
+        only applied to the two-positional case, so single-arg model names
+        were silently stored as ``provider``."""
+        err = BadRequestError("Bad input", "gpt-4o-mini")
+        assert err.model == "gpt-4o-mini"
+        assert err.provider is None
+
+    def test_single_positional_anthropic_model_assigned_to_model(self):
+        """Defence-in-depth: another provider's model name. ``claude-...``
+        is not in SUPPORTED_PROVIDERS so it's a model."""
+        err = BadRequestError("Bad input", "claude-sonnet-4-5")
+        assert err.model == "claude-sonnet-4-5"
+        assert err.provider is None
+
+    def test_param_kwarg_still_threaded_through(self):
+        """The disambiguation refactor must not break the existing
+        ``param=`` keyword on InvalidRequestError."""
+        err = BadRequestError("Bad temperature", "openai", param="temperature")
+        assert err.provider == "openai"
+        assert err.param == "temperature"
