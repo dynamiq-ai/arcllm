@@ -231,12 +231,23 @@ class OpenAIAdapter(BaseAdapter):
                     arguments=fc.get("arguments", ""),
                 )
 
+            # ``reasoning_content`` is the de-facto field name used by
+            # DeepSeek-R1, GLM-4.5+, Groq's DeepSeek/Qwen-thinking models,
+            # Cerebras, Together, Fireworks, and any OpenAI-compat host
+            # serving a reasoning model. ``reasoning`` is the alias
+            # OpenAI ships on the chat-completions endpoint for o-series
+            # responses; we accept either and normalise to one field.
+            reasoning_content = message_data.get("reasoning_content") or message_data.get(
+                "reasoning"
+            )
+
             message = Message(
                 role=message_data.get("role", "assistant"),
                 content=message_data.get("content"),
                 tool_calls=tool_calls,
                 function_call=function_call,
                 refusal=message_data.get("refusal"),
+                reasoning_content=reasoning_content,
             )
 
             choices.append(
@@ -303,6 +314,8 @@ class OpenAIAdapter(BaseAdapter):
                 content=delta_data.get("content"),
                 tool_calls=tool_calls,
                 function_call=delta_data.get("function_call"),
+                reasoning_content=delta_data.get("reasoning_content")
+                or delta_data.get("reasoning"),
             )
 
             choices.append(
