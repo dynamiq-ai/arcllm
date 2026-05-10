@@ -286,21 +286,28 @@ class BadRequestError(ArcLLMError):
         **kwargs: Any,
     ) -> None:
         # Disambiguate (provider, model) vs litellm's (model, llm_provider).
-        # Heuristic: if arg2 is a known provider name and arg3 isn't, use
-        # arcllm's order. If arg3 is a known provider and arg2 isn't, use
-        # litellm's (model, llm_provider) order. Falls back to arcllm's order.
-        if arg2 is not None and arg3 is not None:
+        # Heuristic: SUPPORTED_PROVIDERS membership decides which slot a
+        # positional fills. Applied to single- and two-positional cases —
+        # without it, ``BadRequestError(msg, "gpt-4o-mini")`` (litellm's
+        # ``(message, model)`` shape) silently lands as ``provider``.
+        if arg2 is not None or arg3 is not None:
             from arcllm.providers.base import SUPPORTED_PROVIDERS
 
-            if arg2 not in SUPPORTED_PROVIDERS and arg3 in SUPPORTED_PROVIDERS:
-                # Litellm shape: (message, model, llm_provider)
-                kwargs.setdefault("provider", arg3)
-                kwargs.setdefault("model", arg2)
+            if arg2 is not None and arg3 is not None:
+                if arg2 not in SUPPORTED_PROVIDERS and arg3 in SUPPORTED_PROVIDERS:
+                    # Litellm shape: (message, model, llm_provider)
+                    kwargs.setdefault("provider", arg3)
+                    kwargs.setdefault("model", arg2)
+                else:
+                    kwargs.setdefault("provider", arg2)
+                    kwargs.setdefault("model", arg3)
+            elif arg2 is not None:
+                if arg2 in SUPPORTED_PROVIDERS:
+                    kwargs.setdefault("provider", arg2)
+                else:
+                    kwargs.setdefault("model", arg2)
             else:
-                kwargs.setdefault("provider", arg2)
                 kwargs.setdefault("model", arg3)
-        elif arg2 is not None:
-            kwargs.setdefault("provider", arg2)
         super().__init__(message, *args, **kwargs)
         self.param = param
 
