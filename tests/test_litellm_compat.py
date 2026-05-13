@@ -304,9 +304,7 @@ def test_adk_message_classes_resolve_to_dict_factory():
         cls = getattr(arcllm, name)
         # Must be a dict subclass — guarantees JSON serialization,
         # ``**unpacking``, and ``dict(instance)`` all work.
-        assert issubclass(cls, dict), (
-            f"{name} should alias to a dict subclass, got {cls!r}"
-        )
+        assert issubclass(cls, dict), f"{name} should alias to a dict subclass, got {cls!r}"
         # Must support both styles of access.
         instance = cls(probe="value")
         assert instance["probe"] == "value"
@@ -333,9 +331,7 @@ def test_adk_message_factory_constructs_openai_shape_dict():
         "function": {"name": "lookup", "arguments": '{"q":"x"}'},
     }
 
-    asst = ChatCompletionAssistantMessage(
-        role="assistant", content=None, tool_calls=[tool_call]
-    )
+    asst = ChatCompletionAssistantMessage(role="assistant", content=None, tool_calls=[tool_call])
     assert asst["tool_calls"][0]["function"]["name"] == "lookup"
 
 
@@ -532,7 +528,5 @@ def test_router_stub_raises_on_construction():
 
     with pytest.raises(NotImplementedError, match=r"Router"):
         Router(
-            model_list=[
-                {"model_name": "foo", "litellm_params": {"model": "openai/gpt-4o-mini"}}
-            ]
+            model_list=[{"model_name": "foo", "litellm_params": {"model": "openai/gpt-4o-mini"}}]
         )

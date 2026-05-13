@@ -35,15 +35,15 @@ if TYPE_CHECKING:
 # (capabilities-table attribute, env var name). Together AI / Fireworks AI are
 # spelled with the underscore variant arcllm itself uses internally.
 PROVIDER_TABLES: dict[str, tuple[str, str]] = {
-    "openai":       ("OPENAI_CAPABILITIES",     "OPENAI_API_KEY"),
-    "anthropic":    ("ANTHROPIC_CAPABILITIES",  "ANTHROPIC_API_KEY"),
-    "gemini":       ("GEMINI_CAPABILITIES",     "GEMINI_API_KEY"),
-    "groq":         ("GROQ_CAPABILITIES",       "GROQ_API_KEY"),
-    "xai":          ("XAI_CAPABILITIES",        "XAI_API_KEY"),
-    "mistral":      ("MISTRAL_CAPABILITIES",    "MISTRAL_API_KEY"),
-    "cohere":       ("COHERE_CAPABILITIES",     "COHERE_API_KEY"),
-    "together_ai":  ("TOGETHER_CAPABILITIES",   "TOGETHER_API_KEY"),
-    "fireworks_ai": ("FIREWORKS_CAPABILITIES",  "FIREWORKS_API_KEY"),
+    "openai": ("OPENAI_CAPABILITIES", "OPENAI_API_KEY"),
+    "anthropic": ("ANTHROPIC_CAPABILITIES", "ANTHROPIC_API_KEY"),
+    "gemini": ("GEMINI_CAPABILITIES", "GEMINI_API_KEY"),
+    "groq": ("GROQ_CAPABILITIES", "GROQ_API_KEY"),
+    "xai": ("XAI_CAPABILITIES", "XAI_API_KEY"),
+    "mistral": ("MISTRAL_CAPABILITIES", "MISTRAL_API_KEY"),
+    "cohere": ("COHERE_CAPABILITIES", "COHERE_API_KEY"),
+    "together_ai": ("TOGETHER_CAPABILITIES", "TOGETHER_API_KEY"),
+    "fireworks_ai": ("FIREWORKS_CAPABILITIES", "FIREWORKS_API_KEY"),
 }
 
 
@@ -143,7 +143,9 @@ class TestAgenticParity:
             f"{provider}/{model_name}: no tool_calls and no content"
         )
 
-    def test_structured_output(self, provider: str, model_name: str, caps: ModelCapabilities) -> None:
+    def test_structured_output(
+        self, provider: str, model_name: str, caps: ModelCapabilities
+    ) -> None:
         """Model returns valid JSON when ``response_format={'type':'json_object'}``."""
         if not caps.supports_structured_output:
             pytest.skip(f"{model_name}: capabilities.supports_structured_output=False")
@@ -168,7 +170,9 @@ class TestAgenticParity:
             f"{provider}/{model_name}: structured output is not a JSON object: {parsed!r}"
         )
 
-    def test_reasoning_content_emitted(self, provider: str, model_name: str, caps: ModelCapabilities) -> None:
+    def test_reasoning_content_emitted(
+        self, provider: str, model_name: str, caps: ModelCapabilities
+    ) -> None:
         """Reasoning-capable models populate ``reasoning_content`` or
         ``thinking_blocks`` (the v0.4.9 unified surface).
 

@@ -713,6 +713,7 @@ Choices = Choice
 # the form ``List[ChatCompletionDeltaToolCall]``.
 ChatCompletionDeltaToolCall = dict
 
+
 class _AttrDict(dict):
     """Dict that also exposes its keys as attributes.
 

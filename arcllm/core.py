@@ -46,6 +46,7 @@ __all__ = [
     "stream_chunk_builder",
 ]
 
+
 def _apply_module_drop_params(kwargs: dict[str, Any]) -> None:
     """Honor the module-level ``arcllm.drop_params`` toggle when the caller
     didn't pass a per-call ``drop_params=``.
