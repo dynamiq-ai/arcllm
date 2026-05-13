@@ -714,7 +714,7 @@ Choices = Choice
 ChatCompletionDeltaToolCall = dict
 
 
-class _AttrDict(dict):
+class _AttrDict(dict[str, Any]):
     """Dict that also exposes its keys as attributes.
 
     litellm's typed message / tool-call classes (e.g.

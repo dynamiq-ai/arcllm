@@ -278,10 +278,10 @@ from arcllm.types import (
 #
 # Keeping them as plain ``list`` instances means consumers may safely call
 # ``.append()`` / ``.remove()`` / direct assignment without runtime errors.
-success_callback: list = []
-_async_success_callback: list = []
-failure_callback: list = []
-callbacks: list = []
+success_callback: list[Any] = []
+_async_success_callback: list[Any] = []
+failure_callback: list[Any] = []
+callbacks: list[Any] = []
 
 # Module-level toggle that mirrors litellm's ``litellm.drop_params``.
 # When ``True`` and no per-call ``drop_params=`` is passed, ``completion()``
