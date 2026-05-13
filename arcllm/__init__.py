@@ -69,6 +69,8 @@ See README.md for complete documentation.
 
 from __future__ import annotations
 
+from typing import Any
+
 __version__ = "0.4.9"
 __all__ = [
     "APIConnectionError",
@@ -262,7 +264,6 @@ from arcllm.types import (
     ToolCall,
     Usage,
 )
-
 
 # ---------------------------------------------------------------------------
 # Litellm-compat module attributes.

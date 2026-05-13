@@ -59,7 +59,7 @@ def _apply_module_drop_params(kwargs: dict[str, Any]) -> None:
     # ``import arcllm`` resolves via ``sys.modules`` after first import; the
     # cost is a single dict lookup per call (~sub-microsecond). Done lazily
     # to avoid a top-level circular import (core ↔ arcllm/__init__).
-    import arcllm  # noqa: PLC0415
+    import arcllm
 
     if arcllm.drop_params:
         kwargs["drop_params"] = True

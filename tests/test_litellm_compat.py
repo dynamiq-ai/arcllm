@@ -18,7 +18,6 @@ import pytest
 
 from arcllm.http.client import HTTPResponse
 
-
 # ---------------------------------------------------------------------------
 # Type aliases (arcllm.types)
 # ---------------------------------------------------------------------------
@@ -374,7 +373,8 @@ def test_arcllm_types_utils_submodule_resolves_to_arcllm_types():
     equivalent ``arcllm.types.utils`` after an import swap; arcllm
     exposes the same surface via a one-line sys.modules registration."""
     import arcllm  # noqa: F401  (triggers the registration)
-
+    import arcllm.types as canonical
+    import arcllm.types.utils as alias
     from arcllm.types.utils import (  # noqa: F401
         ChatCompletionDeltaToolCall,
         Choices,
@@ -383,8 +383,6 @@ def test_arcllm_types_utils_submodule_resolves_to_arcllm_types():
         ModelResponseStream,
         StreamingChoices,
     )
-    import arcllm.types as canonical
-    import arcllm.types.utils as alias
 
     assert alias is canonical
 
@@ -497,7 +495,6 @@ def test_arcllm_utils_alias_exposes_usage():
     path resolve without duplicating definitions.
     """
     import arcllm  # noqa: F401  (triggers types module + sys.modules setup)
-
     from arcllm.types import Usage as CanonicalUsage
     from arcllm.utils import Usage
 

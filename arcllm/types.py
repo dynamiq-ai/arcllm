@@ -9,6 +9,7 @@ All types use msgspec.Struct for maximum performance:
 
 from __future__ import annotations
 
+import sys as _sys
 from typing import TYPE_CHECKING, Any, Literal
 
 import msgspec
@@ -791,8 +792,6 @@ ModelResponseStream = StreamChunk
 # single ``types`` module (no nested ``utils`` submodule), so we register
 # the alias path in sys.modules. Done at import time so the side effect
 # happens exactly once when the parent module first loads.
-import sys as _sys
-
 _sys.modules.setdefault(__name__ + ".utils", _sys.modules[__name__])
 
 # Same trick for the top-level ``litellm.utils`` path: ``from litellm.utils
