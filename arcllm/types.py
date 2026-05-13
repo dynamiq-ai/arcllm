@@ -692,10 +692,112 @@ class RerankResponse(_DictLike, msgspec.Struct):
         }
 
 
-# Litellm-compat aliases: dynamiq's tests + TYPE_CHECKING blocks reference
-# names from litellm.utils / litellm. arcllm calls the equivalent types
-# ``ChunkDelta`` and ``StreamingResponse``. Adding these aliases here lets
-# the migration script swap the import path without renaming the symbol at
-# the call sites.
+# Litellm-compat aliases: ``litellm.Delta`` and ``litellm.CustomStreamWrapper``
+# are widely referenced in callers' TYPE_CHECKING blocks and type
+# annotations. arcllm names the equivalent types ``ChunkDelta`` and
+# ``StreamingResponse``; the aliases let an import-path swap leave the
+# symbol names at call sites unchanged.
 Delta = ChunkDelta
 CustomStreamWrapper = StreamingResponse
+
+# litellm uses the plural name ``Choices`` for the type that holds a single
+# non-streaming choice item (``response.choices[i]``); arcllm names it
+# ``Choice`` (singular). The alias keeps ``from litellm import Choices``
+# resolving after an import-path swap.
+Choices = Choice
+
+# litellm's typed wrapper for partial tool-call deltas during streaming.
+# arcllm emits these deltas as plain dicts (see ``ChunkDelta.tool_calls``),
+# so the alias resolves to ``dict`` — sufficient for type annotations of
+# the form ``List[ChatCompletionDeltaToolCall]``.
+ChatCompletionDeltaToolCall = dict
+
+class _AttrDict(dict):
+    """Dict that also exposes its keys as attributes.
+
+    litellm's typed message / tool-call classes (e.g.
+    ``ChatCompletionMessageToolCall``) are Pydantic-ish models where both
+    ``obj["type"]`` and ``obj.type`` resolve to the same value.
+    Litellm-compat callers mix the two styles freely — streaming parsers
+    commonly do ``tool_call.function.name`` (attribute access on partial
+    deltas) while request builders rely on JSON-serialization of the
+    underlying dict shape. Aliasing to plain ``dict`` would satisfy the
+    request path but break attribute readers; this subclass closes the
+    gap with zero runtime overhead: JSON serialization, ``**unpacking``,
+    and ``dict(obj)`` still work because it *is* a dict.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, key: str) -> Any:
+        try:
+            return self[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        self[key] = value
+
+    def __delattr__(self, key: str) -> None:
+        try:
+            del self[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+
+# Litellm-compat typed-class aliases. These names are widely imported as
+# dict FACTORIES at the call site:
+# ``ChatCompletionUserMessage(role="user", content="hi")`` returns
+# ``{"role": "user", "content": "hi"}`` — the OpenAI-shape dict that
+# arcllm's ``acompletion(messages=…)`` already consumes. Aliasing to
+# :class:`_AttrDict` (a dict subclass with attribute access) preserves
+# the dual ``obj["x"]`` / ``obj.x`` access pattern that litellm's typed
+# Pydantic models expose, so callers that mix the two styles keep
+# working after an import-path swap.
+ChatCompletionAssistantMessage = _AttrDict
+ChatCompletionAssistantToolCall = _AttrDict
+ChatCompletionMessageToolCall = _AttrDict
+ChatCompletionSystemMessage = _AttrDict
+ChatCompletionToolMessage = _AttrDict
+ChatCompletionUserMessage = _AttrDict
+Function = _AttrDict
+
+# ``litellm.FileObject`` is the return shape of ``litellm.acreate_file`` —
+# callers read ``file.id`` and ``file.purpose`` off it. arcllm doesn't
+# implement file upload yet (:func:`arcllm.acreate_file` raises) but the
+# name must resolve so test fixtures that construct a mock FileObject
+# don't AttributeError.
+FileObject = _AttrDict
+
+# Type-annotation alias. ``OpenAIMessageContent`` is a Union covering
+# str + list of content blocks in litellm; ADK uses it only as a return-type
+# annotation (``Union[OpenAIMessageContent, str]``), so the looser ``list``
+# alias is honest — multimodal content is a list of content-block dicts.
+OpenAIMessageContent = list
+
+# ADK tests build mock streaming responses with ``StreamingChoices``;
+# arcllm names this ``ChunkChoice`` (a real msgspec Struct with ``index``,
+# ``delta``, ``finish_reason``).
+StreamingChoices = ChunkChoice
+
+# ADK imports ``ModelResponseStream`` from ``litellm`` and from
+# ``litellm.types.utils`` — both reference the streaming response/chunk
+# type. arcllm names this ``StreamChunk``.
+ModelResponseStream = StreamChunk
+
+
+# Litellm-compat path alias: ``from litellm.types.utils import X`` becomes
+# ``from arcllm.types.utils import X``. arcllm keeps everything in this
+# single ``types`` module (no nested ``utils`` submodule), so we register
+# the alias path in sys.modules. Done at import time so the side effect
+# happens exactly once when the parent module first loads.
+import sys as _sys
+
+_sys.modules.setdefault(__name__ + ".utils", _sys.modules[__name__])
+
+# Same trick for the top-level ``litellm.utils`` path: ``from litellm.utils
+# import Usage`` (and similar) maps to ``from arcllm.utils import Usage``
+# after the litellm-shim swap. arcllm exposes ``Usage`` at ``arcllm.types``;
+# registering the parent ``arcllm.utils`` path lets the simpler import work
+# without duplicating definitions.
+_sys.modules.setdefault("arcllm.utils", _sys.modules[__name__])

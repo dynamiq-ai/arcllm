@@ -276,7 +276,7 @@ class AzureOpenAIAdapter(OpenAIAdapter):
 
 # Register on import
 register_provider("azure", AzureOpenAIAdapter)
-# Alias for callers using the Azure AI Foundry-style provider name (parity
-# with dynamiq's ``AzureAI`` node, which addresses Foundry deployments
-# directly).
+# Alias for callers using the Azure AI Foundry-style provider name. Same
+# adapter — Foundry deployments expose an OpenAI-compatible chat completions
+# endpoint that the existing Azure OpenAI machinery handles unchanged.
 register_provider("azure_ai", AzureOpenAIAdapter)

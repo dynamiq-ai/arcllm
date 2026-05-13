@@ -46,6 +46,25 @@ __all__ = [
     "stream_chunk_builder",
 ]
 
+def _apply_module_drop_params(kwargs: dict[str, Any]) -> None:
+    """Honor the module-level ``arcllm.drop_params`` toggle when the caller
+    didn't pass a per-call ``drop_params=``.
+
+    litellm-compat: this mirrors ``litellm.drop_params = True`` being a
+    once-and-done global. Per-call values always win — only used as the
+    fallback when ``drop_params`` is absent from kwargs.
+    """
+    if "drop_params" in kwargs:
+        return
+    # ``import arcllm`` resolves via ``sys.modules`` after first import; the
+    # cost is a single dict lookup per call (~sub-microsecond). Done lazily
+    # to avoid a top-level circular import (core ↔ arcllm/__init__).
+    import arcllm  # noqa: PLC0415
+
+    if arcllm.drop_params:
+        kwargs["drop_params"] = True
+
+
 # Pre-computed frozenset of config parameters to exclude from completion kwargs.
 # Using frozenset at module level avoids recreating the set on every call.
 _CONFIG_PARAMS: frozenset[str] = frozenset(
@@ -230,6 +249,7 @@ def completion(
     Raises:
         ArcLLMError: On any error
     """
+    _apply_module_drop_params(kwargs)
     adapter, model_id = _get_adapter(model, **kwargs)
 
     # Remove config params from kwargs using pre-computed frozenset
@@ -338,6 +358,7 @@ async def acompletion(
     Raises:
         ArcLLMError: On any error
     """
+    _apply_module_drop_params(kwargs)
     adapter, model_id = _get_adapter(model, **kwargs)
 
     # Remove config params from kwargs using pre-computed frozenset

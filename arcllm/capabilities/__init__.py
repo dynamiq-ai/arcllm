@@ -44,6 +44,7 @@ __all__ = [
     "get_supported_openai_params",
     "supports_function_calling",
     "supports_pdf_input",
+    "supports_response_schema",
     "supports_structured_output",
     "supports_tools",
     "supports_vision",
@@ -58,6 +59,15 @@ def supports_function_calling(model: str) -> bool:
     can be migrated without renaming.
     """
     return supports_tools(model)
+
+
+def supports_response_schema(model: str) -> bool:
+    """Alias of :func:`supports_structured_output` (litellm-compat naming).
+
+    Upstream code that previously called ``litellm.utils.supports_response_schema``
+    can call ``arcllm.supports_response_schema`` unchanged.
+    """
+    return supports_structured_output(model)
 
 
 def get_model_info(model: str) -> dict[str, Any]:
