@@ -184,6 +184,7 @@ markers = [
     "smoke: Quick smoke tests for CI/CD validation",
     "slow: Slow tests that may be skipped in CI",
     "integration: All integration tests requiring live API keys",
+    "live: Tests that fire live provider API calls; only run on the nightly integration workflow",
     "openai: OpenAI-specific tests",
     "anthropic: Anthropic-specific tests",
     "gemini: Google Gemini-specific tests",

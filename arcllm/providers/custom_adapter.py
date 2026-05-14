@@ -1,14 +1,13 @@
 """
-CustomLLM adapter for arcllm.
+Custom-endpoint adapter for arcllm.
 
-Lets users target any OpenAI-compatible HTTP endpoint by supplying their own
-base URL plus headers via :class:`ProviderConfig`. This is the
-fall-through adapter that dynamiq's ``CustomLLM`` node wires into when a
-user points it at a self-hosted vLLM, llama.cpp server, LiteLLM proxy, or
-internal gateway.
+Fall-through adapter for any OpenAI-compatible HTTP endpoint. Callers
+supply the base URL plus headers via :class:`ProviderConfig` — typical
+targets are self-hosted vLLM, llama.cpp servers, LiteLLM / OpenRouter-style
+proxies, and internal gateways.
 
 The model id is passed through verbatim to ``model`` in the request body.
-Auth is whatever the user supplies in ``extra_headers`` (or, by default,
+Auth is whatever the caller supplies in ``extra_headers`` (or, by default,
 ``Authorization: Bearer <api_key>``).
 
 There is no env-var fallback here on purpose — "custom" means the caller

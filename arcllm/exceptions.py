@@ -387,10 +387,23 @@ def map_status_code_to_exception(
     return ProviderAPIError(message, status_code=status_code, **kwargs)
 
 
-# Litellm-compatibility aliases. Kept for downstream callers (notably
-# dynamiq) that import the legacy names from litellm.exceptions. These add
-# zero runtime overhead — they are simply alternative bindings to the same
-# class objects.
+class ContextWindowExceededError(BadRequestError):
+    """Raised when prompt + completion exceed the model's context window.
+
+    litellm-compat: identical name and inheritance shape, so callers that
+    ``except ContextWindowExceededError`` keep working after an
+    import-path swap.
+
+    Provider adapters should map 400-class errors whose payload mentions
+    context length / token limit to this class. Until they do, raise-side
+    coverage is partial — but catch sites already compile and downstream
+    code can construct/raise the class directly.
+    """
+
+
+# Litellm-compat aliases. Kept so callers that import the litellm exception
+# names continue resolving after an import-path swap. Zero runtime overhead
+# — these are alternative bindings to the same class objects.
 Timeout = TimeoutError
 APIConnectionError = ConnectionError
 # litellm names ``APIError`` and ``BadRequestError`` map to arcllm's

@@ -51,6 +51,11 @@ jobs:
           - { provider: nvidia_nim,   env: NVIDIA_NIM_API_KEY,  file: tests/integration/test_provider_matrix.py, args: "-k nvidia_nim" }
           - { provider: bedrock,      env: AWS_ACCESS_KEY_ID,   file: tests/integration/test_provider_matrix.py, args: "-k bedrock" }
           - { provider: watsonx,      env: WATSONX_API_KEY,     file: tests/integration/test_provider_matrix.py, args: "-k watsonx" }
+          # Cross-provider agentic-parity matrix — one row per (provider, chat
+          # model) for streaming, tools, structured output, reasoning. Gates on
+          # OPENAI_API_KEY so the job is skipped on PRs from forks; per-row
+          # tests skip individually when their provider's key is missing.
+          - { provider: agentic-parity, env: OPENAI_API_KEY,    file: tests/integration/test_agentic_parity.py }
     steps:
       - name: Skip when secret missing
         id: gate

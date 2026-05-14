@@ -12,8 +12,8 @@ Resolution order:
    of thumb. Emits a one-time warning so callers know the count is approximate.
 
 The heuristic is "good enough" for context-window guard rails (the typical
-caller use case in dynamiq) but not for billing. For billing, use the
-provider-reported usage on the response.
+caller use case — token-budget enforcement, history pruning) but not for
+billing. For billing, use the provider-reported usage on the response.
 """
 
 from __future__ import annotations
@@ -163,9 +163,9 @@ def token_counter(
     overhead formula (3 tokens per message + 3 priming tokens for the
     final assistant turn) so counts are comparable to litellm and to
     OpenAI's own ``tiktoken`` cookbook examples. Without the overhead,
-    arcllm would systematically undercount and downstream callers
-    (notably dynamiq's history-summarisation logic) would preserve
-    more messages than the model's context window can actually hold.
+    arcllm would systematically undercount, and callers doing
+    history-pruning / context-window enforcement would preserve more
+    messages than the model can actually hold.
 
     Raises ``ValueError`` if both ``messages`` and ``text`` are missing.
     """
