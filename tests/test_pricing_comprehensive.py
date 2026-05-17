@@ -323,3 +323,72 @@ class TestModelPricingDataclass:
             cached_input_cost_per_million=0.3,
         )
         assert pricing.cached_input_cost_per_million == 0.3
+
+
+class TestImageGenCoverage:
+    """Pin per-image pricing for the image-generation models arcllm supports
+    via :func:`arcllm.image_generation`. Prices come from each provider's
+    canonical pricing page; see the manifest ``sources`` block."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "openai/dall-e-3",
+            "openai/dall-e-2",
+            "openai/gpt-image-1",
+            "gemini/imagen-3",
+            "azure/dall-e-3",
+        ],
+    )
+    def test_image_models_have_per_request_pricing(self, model):
+        p = get_model_pricing(model)
+        assert p.image_per_request is not None
+        assert p.image_per_request > 0
+
+
+class TestAudioCoverage:
+    """Pin per-character (TTS) and per-second (STT) pricing for the audio
+    models arcllm exposes via its OpenAI-shaped audio routes."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "openai/tts-1",
+            "openai/tts-1-hd",
+            "azure/tts-1",
+        ],
+    )
+    def test_tts_has_per_character_pricing(self, model):
+        p = get_model_pricing(model)
+        assert p.audio_per_character is not None
+        assert p.audio_per_character > 0
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "openai/whisper-1",
+            "azure/whisper-1",
+        ],
+    )
+    def test_stt_has_per_second_pricing(self, model):
+        p = get_model_pricing(model)
+        assert p.audio_per_second is not None
+        assert p.audio_per_second > 0
+
+
+class TestRerankCoverage:
+    """Pin per-query pricing for the rerank models exposed via
+    :func:`arcllm.rerank`."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "cohere/rerank-english-v3.0",
+            "cohere/rerank-multilingual-v3.0",
+            "cohere/rerank-v3.5",
+        ],
+    )
+    def test_rerank_has_per_query_pricing(self, model):
+        p = get_model_pricing(model)
+        assert p.rerank_per_query is not None
+        assert p.rerank_per_query > 0

@@ -82,12 +82,19 @@ def test_pricing_dataclass_shape() -> None:
 
 def test_capabilities_dataclass_shape() -> None:
     """Spot-check that every capability entry has the new ``kind`` field."""
+    valid_kinds = {
+        "chat",
+        "reason",
+        "embed",
+        "image",
+        "audio_speech",
+        "audio_transcription",
+        "rerank",
+    }
     for provider, table in ALL_CAPABILITIES.items():
         for model_id, caps in table.items():
             assert isinstance(caps, ModelCapabilities), f"{provider}/{model_id}"
-            assert caps.kind in {"chat", "reason", "embed"}, (
-                f"{provider}/{model_id}: kind={caps.kind!r}"
-            )
+            assert caps.kind in valid_kinds, f"{provider}/{model_id}: kind={caps.kind!r}"
 
 
 def test_embedding_models_have_dimensions() -> None:

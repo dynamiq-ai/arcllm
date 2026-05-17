@@ -3,7 +3,7 @@ Pricing tables for supported LLM models.
 
 Prices are in USD per 1 million tokens.
 Generated from `tmp/model_manifests/` by `scripts/sync_tables.py`.
-Last updated: 2026-05-07
+Last updated: 2026-05-14
 
 To update prices:
     1. Refresh the manifests: see plan + AGENTS.md for the agent-driven workflow.
@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-PRICING_VERSION = "2026.05.07"
+PRICING_VERSION = "2026.05.14"
 
 
 @dataclass(slots=True, frozen=True)
@@ -112,6 +112,12 @@ OPENAI_PRICING: dict[str, ModelPricing] = {
     "gpt-realtime": ModelPricing(4.0, 16.0, 0.4),
     "gpt-realtime-mini": ModelPricing(0.6, 2.4),
     "gpt-realtime-1.5": ModelPricing(4.0, 16.0, 0.4),
+    "dall-e-3": ModelPricing(0.0, 0.0, None, image_per_request=0.04),
+    "dall-e-2": ModelPricing(0.0, 0.0, None, image_per_request=0.02),
+    "gpt-image-1": ModelPricing(0.0, 0.0, None, image_per_request=0.04),
+    "tts-1": ModelPricing(0.0, 0.0, None, audio_per_character=0.000015),
+    "tts-1-hd": ModelPricing(0.0, 0.0, None, audio_per_character=0.00003),
+    "whisper-1": ModelPricing(0.0, 0.0, None, audio_per_second=0.0001),
     "text-embedding-3-small": ModelPricing(0.02, 0.0),
     "text-embedding-3-large": ModelPricing(0.13, 0.0),
     "text-embedding-ada-002": ModelPricing(0.1, 0.0),
@@ -154,6 +160,10 @@ AZURE_PRICING: dict[str, ModelPricing] = {
     "gpt-realtime": ModelPricing(4.0, 16.0, 0.4),
     "gpt-realtime-mini": ModelPricing(0.6, 2.4),
     "gpt-realtime-1.5": ModelPricing(4.0, 16.0, 0.4),
+    "dall-e-3": ModelPricing(0.0, 0.0, None, image_per_request=0.04),
+    "dall-e-2": ModelPricing(0.0, 0.0, None, image_per_request=0.02),
+    "tts-1": ModelPricing(0.0, 0.0, None, audio_per_character=0.000015),
+    "whisper-1": ModelPricing(0.0, 0.0, None, audio_per_second=0.0001),
     "text-embedding-3-small": ModelPricing(0.02, 0.0),
     "text-embedding-3-large": ModelPricing(0.13, 0.0),
     "text-embedding-ada-002": ModelPricing(0.1, 0.0),
@@ -193,6 +203,7 @@ GEMINI_PRICING: dict[str, ModelPricing] = {
     "gemini-3.1-pro-preview": ModelPricing(2.0, 12.0, 0.2),
     "gemini-3-flash-preview": ModelPricing(0.5, 3.0, 0.05),
     "gemini-3.1-flash-lite-preview": ModelPricing(0.25, 1.5, 0.025),
+    "imagen-3": ModelPricing(0.0, 0.0, None, image_per_request=0.04),
     "gemini-embedding-001": ModelPricing(0.15, 0.0),
     "gemini-embedding-2": ModelPricing(0.2, 0.0),
 }
@@ -212,6 +223,8 @@ VERTEX_AI_PRICING: dict[str, ModelPricing] = {
     "gemini-3-flash-preview": ModelPricing(0.5, 3.0, 0.05),
     "gemini-3.1-pro-preview": ModelPricing(2.0, 12.0, 0.2),
     "gemini-3.1-flash-lite-preview": ModelPricing(0.25, 1.5, 0.025),
+    "imagen-3": ModelPricing(0.0, 0.0, None, image_per_request=0.04),
+    "vertex-ranker": ModelPricing(0.0, 0.0, None, rerank_per_query=0.001),
     "text-embedding-005": ModelPricing(0.1, 0.0),
     "text-multilingual-embedding-002": ModelPricing(0.1, 0.0),
     "gemini-embedding-001": ModelPricing(0.15, 0.0),
@@ -296,6 +309,9 @@ COHERE_PRICING: dict[str, ModelPricing] = {
     "command-r-plus-08-2024": ModelPricing(2.5, 10.0),
     "command-r-08-2024": ModelPricing(0.15, 0.6),
     "command-r7b-12-2024": ModelPricing(0.0375, 0.15),
+    "rerank-english-v3.0": ModelPricing(0.0, 0.0, None, rerank_per_query=0.002),
+    "rerank-multilingual-v3.0": ModelPricing(0.0, 0.0, None, rerank_per_query=0.002),
+    "rerank-v3.5": ModelPricing(0.0, 0.0, None, rerank_per_query=0.002),
     "embed-v4.0": ModelPricing(0.12, 0.0),
     "embed-english-v3.0": ModelPricing(0.1, 0.0),
     "embed-multilingual-v3.0": ModelPricing(0.1, 0.0),
