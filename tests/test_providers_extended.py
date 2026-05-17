@@ -310,3 +310,139 @@ class TestOpenAICacheTokenExtraction:
         resp = adapter.parse_response(body, model="gpt-3.5-turbo")
         assert resp.usage is not None
         assert resp.usage.cache_read_input_tokens is None
+
+
+class TestDeepSeekCacheTokenExtraction:
+    """DeepSeek reports cache hits as a top-level ``prompt_cache_hit_tokens``
+    field instead of OpenAI's nested ``prompt_tokens_details.cached_tokens``.
+    The adapter must lift it into the canonical ``cache_read_input_tokens``
+    so the 90%-off cache rate gets applied."""
+
+    @pytest.fixture
+    def adapter(self):
+        from arcllm.providers.deepseek_adapter import DeepSeekAdapter
+
+        return DeepSeekAdapter(ProviderConfig(api_key="test"))
+
+    def test_prompt_cache_hit_tokens_lifted(self, adapter):
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "deepseek-chat",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "hi"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "total_tokens": 1050,
+                    "prompt_cache_hit_tokens": 800,
+                    "prompt_cache_miss_tokens": 200,
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="deepseek-chat")
+        assert resp.usage is not None
+        assert resp.usage.cache_read_input_tokens == 800
+
+
+class TestDatabricksCacheTokenExtraction:
+    """Databricks-hosted Claude returns Anthropic-shaped cache fields at
+    the top level of ``usage``. The adapter (which inherits from
+    OpenAIAdapter) must lift both ``cache_read_input_tokens`` and
+    ``cache_creation_input_tokens``."""
+
+    @pytest.fixture
+    def adapter(self):
+        from arcllm.providers.databricks_adapter import DatabricksAdapter
+
+        return DatabricksAdapter(
+            ProviderConfig(api_key="test", api_base="https://x.databricks.com")
+        )
+
+    def test_anthropic_cache_fields_lifted(self, adapter):
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "databricks-claude-sonnet-4-5",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "hi"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1200,
+                    "completion_tokens": 30,
+                    "total_tokens": 1230,
+                    "cache_read_input_tokens": 600,
+                    "cache_creation_input_tokens": 400,
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="databricks-claude-sonnet-4-5")
+        assert resp.usage is not None
+        assert resp.usage.cache_read_input_tokens == 600
+        assert resp.usage.cache_creation_input_tokens == 400
+
+
+class TestGeminiCacheTokenExtraction:
+    """Gemini's context caching reports cache hits via
+    ``usageMetadata.cachedContentTokenCount``. The adapter must lift it
+    into ``cache_read_input_tokens`` so the 90%-off cache rate applies."""
+
+    @pytest.fixture
+    def adapter(self):
+        from arcllm.providers.gemini_adapter import GeminiAdapter
+
+        return GeminiAdapter(ProviderConfig(api_key="test"))
+
+    def test_cached_content_token_count_lifted(self, adapter):
+        body = json.dumps(
+            {
+                "candidates": [
+                    {
+                        "content": {"role": "model", "parts": [{"text": "hi"}]},
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {
+                    "promptTokenCount": 1000,
+                    "candidatesTokenCount": 50,
+                    "totalTokenCount": 1050,
+                    "cachedContentTokenCount": 800,
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="gemini-2.5-pro")
+        assert resp.usage is not None
+        assert resp.usage.cache_read_input_tokens == 800
+
+    def test_no_cached_content_means_none(self, adapter):
+        body = json.dumps(
+            {
+                "candidates": [
+                    {
+                        "content": {"role": "model", "parts": [{"text": "hi"}]},
+                        "finishReason": "STOP",
+                    }
+                ],
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 5,
+                    "totalTokenCount": 15,
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="gemini-2.5-pro")
+        assert resp.usage is not None
+        assert resp.usage.cache_read_input_tokens is None

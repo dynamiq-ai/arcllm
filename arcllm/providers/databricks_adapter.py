@@ -156,5 +156,30 @@ class DatabricksAdapter(OpenAIAdapter):
         )
 
 
+    def _extract_cache_tokens(
+        self,
+        usage_data: dict[str, Any],
+    ) -> tuple[int | None, int | None]:
+        """Databricks-hosted Claude returns Anthropic-shaped cache fields
+        at the top of the ``usage`` block:
+
+        - ``cache_read_input_tokens``: tokens served from cache (90% off)
+        - ``cache_creation_input_tokens``: tokens written to cache (1.25x
+          base rate by default; per-model override via manifest)
+
+        For non-Anthropic Databricks routes (Llama, DBRX), neither field
+        is present and we fall through to OpenAI's default lookup so
+        any future Databricks OpenAI-compat shape keeps working.
+        """
+        cache_read = usage_data.get("cache_read_input_tokens")
+        cache_creation = usage_data.get("cache_creation_input_tokens")
+        if cache_read is not None or cache_creation is not None:
+            return (
+                int(cache_read) if cache_read is not None else None,
+                int(cache_creation) if cache_creation is not None else None,
+            )
+        return super()._extract_cache_tokens(usage_data)
+
+
 # Register on import
 register_provider("databricks", DatabricksAdapter)

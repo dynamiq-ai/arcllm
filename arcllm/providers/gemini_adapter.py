@@ -475,12 +475,17 @@ class GeminiAdapter(BaseAdapter):
                 )
             )
 
-        # Parse usage
+        # Parse usage. ``cachedContentTokenCount`` carries the count of
+        # tokens served from a context-cache hit (90% off the base input
+        # rate); lift it into the canonical ``cache_read_input_tokens``
+        # field so :func:`arcllm.completion_cost` applies the cached rate.
         usage_metadata = resp.get("usageMetadata", {})
+        cached_count = usage_metadata.get("cachedContentTokenCount")
         usage = Usage(
             prompt_tokens=usage_metadata.get("promptTokenCount", 0),
             completion_tokens=usage_metadata.get("candidatesTokenCount", 0),
             total_tokens=usage_metadata.get("totalTokenCount", 0),
+            cache_read_input_tokens=cached_count,
         )
 
         return ModelResponse(
@@ -565,14 +570,17 @@ class GeminiAdapter(BaseAdapter):
                 )
             )
 
-        # Usage in stream
+        # Usage in stream (same shape as non-streaming; lift cache count
+        # so streaming completion_cost stays accurate).
         usage = None
         usage_metadata = event.get("usageMetadata")
         if usage_metadata:
+            cached_count = usage_metadata.get("cachedContentTokenCount")
             usage = Usage(
                 prompt_tokens=usage_metadata.get("promptTokenCount", 0),
                 completion_tokens=usage_metadata.get("candidatesTokenCount", 0),
                 total_tokens=usage_metadata.get("totalTokenCount", 0),
+                cache_read_input_tokens=cached_count,
             )
 
         return StreamChunk(

@@ -183,6 +183,36 @@ class OpenAIAdapter(BaseAdapter):
             timeout=self.config.timeout,
         )
 
+    def _extract_cache_tokens(
+        self,
+        usage_data: dict[str, Any],
+    ) -> tuple[int | None, int | None]:
+        """Extract ``(cache_read, cache_creation)`` token counts from a
+        provider's ``usage`` block.
+
+        Default behavior covers vanilla OpenAI: read the cached count from
+        ``prompt_tokens_details.cached_tokens``; OpenAI does not currently
+        bill a separate cache-write surcharge, so ``cache_creation``
+        stays ``None``.
+
+        Subclasses override to support provider-specific shapes:
+
+        - DeepSeek lifts the top-level ``prompt_cache_hit_tokens`` field.
+        - Databricks (Claude-on-Databricks) reads the Anthropic-shaped
+          ``cache_read_input_tokens`` and ``cache_creation_input_tokens``
+          fields at the top of the usage dict.
+
+        Returns ``(None, None)`` when no caching fields are present so the
+        cost calculator can distinguish "no caching" from "cached zero
+        tokens" (a real distinction for some billing models).
+        """
+        prompt_details = usage_data.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached = prompt_details.get("cached_tokens")
+            if cached is not None:
+                return (cached, None)
+        return (None, None)
+
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse OpenAI chat completion response."""
         try:
@@ -263,24 +293,15 @@ class OpenAIAdapter(BaseAdapter):
         usage: Usage | None = None
         usage_data = resp.get("usage")
         if usage_data:
-            # Lift ``prompt_tokens_details.cached_tokens`` (OpenAI prompt
-            # caching) into ``cache_read_input_tokens`` so the cost
-            # calculator can apply the cached rate without nested-dict
-            # introspection. ``None`` when caching is not in play —
-            # distinguishes from a zero hit-count.
-            prompt_details = usage_data.get("prompt_tokens_details")
-            cached_tokens = (
-                prompt_details.get("cached_tokens")
-                if isinstance(prompt_details, dict)
-                else None
-            )
+            cache_read, cache_creation = self._extract_cache_tokens(usage_data)
             usage = Usage(
                 prompt_tokens=usage_data.get("prompt_tokens", 0),
                 completion_tokens=usage_data.get("completion_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
-                prompt_tokens_details=prompt_details,
+                prompt_tokens_details=usage_data.get("prompt_tokens_details"),
                 completion_tokens_details=usage_data.get("completion_tokens_details"),
-                cache_read_input_tokens=cached_tokens,
+                cache_read_input_tokens=cache_read,
+                cache_creation_input_tokens=cache_creation,
             )
 
         return ModelResponse(
@@ -343,19 +364,15 @@ class OpenAIAdapter(BaseAdapter):
         usage: Usage | None = None
         usage_data = event.get("usage")
         if usage_data:
-            prompt_details = usage_data.get("prompt_tokens_details")
-            cached_tokens = (
-                prompt_details.get("cached_tokens")
-                if isinstance(prompt_details, dict)
-                else None
-            )
+            cache_read, cache_creation = self._extract_cache_tokens(usage_data)
             usage = Usage(
                 prompt_tokens=usage_data.get("prompt_tokens", 0),
                 completion_tokens=usage_data.get("completion_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
-                prompt_tokens_details=prompt_details,
+                prompt_tokens_details=usage_data.get("prompt_tokens_details"),
                 completion_tokens_details=usage_data.get("completion_tokens_details"),
-                cache_read_input_tokens=cached_tokens,
+                cache_read_input_tokens=cache_read,
+                cache_creation_input_tokens=cache_creation,
             )
 
         return StreamChunk(
