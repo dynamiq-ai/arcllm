@@ -263,12 +263,24 @@ class OpenAIAdapter(BaseAdapter):
         usage: Usage | None = None
         usage_data = resp.get("usage")
         if usage_data:
+            # Lift ``prompt_tokens_details.cached_tokens`` (OpenAI prompt
+            # caching) into ``cache_read_input_tokens`` so the cost
+            # calculator can apply the cached rate without nested-dict
+            # introspection. ``None`` when caching is not in play —
+            # distinguishes from a zero hit-count.
+            prompt_details = usage_data.get("prompt_tokens_details")
+            cached_tokens = (
+                prompt_details.get("cached_tokens")
+                if isinstance(prompt_details, dict)
+                else None
+            )
             usage = Usage(
                 prompt_tokens=usage_data.get("prompt_tokens", 0),
                 completion_tokens=usage_data.get("completion_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
-                prompt_tokens_details=usage_data.get("prompt_tokens_details"),
+                prompt_tokens_details=prompt_details,
                 completion_tokens_details=usage_data.get("completion_tokens_details"),
+                cache_read_input_tokens=cached_tokens,
             )
 
         return ModelResponse(
@@ -331,12 +343,19 @@ class OpenAIAdapter(BaseAdapter):
         usage: Usage | None = None
         usage_data = event.get("usage")
         if usage_data:
+            prompt_details = usage_data.get("prompt_tokens_details")
+            cached_tokens = (
+                prompt_details.get("cached_tokens")
+                if isinstance(prompt_details, dict)
+                else None
+            )
             usage = Usage(
                 prompt_tokens=usage_data.get("prompt_tokens", 0),
                 completion_tokens=usage_data.get("completion_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
-                prompt_tokens_details=usage_data.get("prompt_tokens_details"),
+                prompt_tokens_details=prompt_details,
                 completion_tokens_details=usage_data.get("completion_tokens_details"),
+                cache_read_input_tokens=cached_tokens,
             )
 
         return StreamChunk(

@@ -205,3 +205,108 @@ class TestBaseProviderRegister:
         register_all_providers()
         # Should not change (providers already registered)
         assert len(_PROVIDERS) >= initial_count
+
+
+class TestOpenAICacheTokenExtraction:
+    """Pin OpenAI's cache + reasoning token extraction.
+
+    Without these lifts, ``completion_cost()`` undercounts cache savings
+    (treats cached prompt tokens at full rate) and over- / under-bills
+    reasoning models (no separate reasoning rate applied).
+    """
+
+    @pytest.fixture
+    def adapter(self):
+        from arcllm.providers.openai_adapter import OpenAIAdapter
+
+        return OpenAIAdapter(ProviderConfig(api_key="test"))
+
+    def test_cached_tokens_promoted_to_cache_read_input_tokens(self, adapter):
+        """``prompt_tokens_details.cached_tokens`` must be lifted into
+        ``Usage.cache_read_input_tokens`` so ``cost_per_token`` applies
+        the cached rate to those tokens."""
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "hi"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "total_tokens": 1050,
+                    "prompt_tokens_details": {"cached_tokens": 800},
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="gpt-4o-mini")
+        assert resp.usage is not None
+        assert resp.usage.cache_read_input_tokens == 800
+        # The full details dict is preserved too so other introspection
+        # paths keep working.
+        assert resp.usage.prompt_tokens_details == {"cached_tokens": 800}
+
+    def test_reasoning_tokens_round_trip_through_details(self, adapter):
+        """``completion_tokens_details.reasoning_tokens`` must round-trip
+        so ``completion_cost`` can apply the reasoning rate when the
+        model exposes one."""
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "o3-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "answer"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 600,
+                    "total_tokens": 700,
+                    "completion_tokens_details": {"reasoning_tokens": 500},
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="o3-mini")
+        assert resp.usage is not None
+        assert resp.usage.completion_tokens_details == {"reasoning_tokens": 500}
+
+    def test_cached_tokens_none_when_no_details(self, adapter):
+        """Absent ``prompt_tokens_details`` must leave
+        ``cache_read_input_tokens`` as ``None`` (not a spurious zero) so
+        downstream cost code can distinguish ``no caching`` from
+        ``caching with no hits``."""
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-3.5-turbo",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "hi"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            }
+        ).encode("utf-8")
+        resp = adapter.parse_response(body, model="gpt-3.5-turbo")
+        assert resp.usage is not None
+        assert resp.usage.cache_read_input_tokens is None
