@@ -137,19 +137,46 @@ def _fmt_price(v: float | None) -> str:
 
 
 def _pricing_line(model: dict) -> str:
+    """Emit one ``"<id>": ModelPricing(...)`` line.
+
+    Required positional args: input/output per-million. ``cached_input_per_m``
+    is the third positional (legacy form, kept for backwards-compat with
+    the 558 existing entries). Any other optional field — cache-write,
+    reasoning, image, audio, rerank — is emitted as a kwarg so callers
+    can introspect ``pricing.<field>`` without guessing positions.
+    """
+    parts = [
+        _fmt_price(model["input_per_m"]),
+        _fmt_price(model["output_per_m"]),
+    ]
     cached = model.get("cached_input_per_m")
-    if cached is None:
-        return (
-            f"    {model['id']!r}: "
-            f"ModelPricing({_fmt_price(model['input_per_m'])}, "
-            f"{_fmt_price(model['output_per_m'])}),"
-        )
-    return (
-        f"    {model['id']!r}: "
-        f"ModelPricing({_fmt_price(model['input_per_m'])}, "
-        f"{_fmt_price(model['output_per_m'])}, "
-        f"{_fmt_price(cached)}),"
-    )
+    if cached is not None:
+        parts.append(_fmt_price(cached))
+    elif _any_extra_pricing(model):
+        # Need a placeholder for the third positional so kwargs land
+        # in the right slots. Use ``None`` (the field default) explicitly.
+        parts.append("None")
+
+    for manifest_key, kw in _EXTRA_PRICING_FIELDS:
+        v = model.get(manifest_key)
+        if v is not None:
+            parts.append(f"{kw}={_fmt_price(v)}")
+
+    return f"    {model['id']!r}: ModelPricing({', '.join(parts)}),"
+
+
+_EXTRA_PRICING_FIELDS: tuple[tuple[str, str], ...] = (
+    ("cache_creation_per_m", "cache_creation_cost_per_million"),
+    ("reasoning_per_m", "output_cost_per_reasoning_token"),
+    ("image_per_request", "image_per_request"),
+    ("audio_per_character", "audio_per_character"),
+    ("audio_per_second", "audio_per_second"),
+    ("rerank_per_query", "rerank_per_query"),
+)
+
+
+def _any_extra_pricing(model: dict) -> bool:
+    return any(model.get(key) is not None for key, _ in _EXTRA_PRICING_FIELDS)
 
 
 def _embed_pricing_line(model: dict) -> str:
@@ -241,12 +268,42 @@ PRICING_VERSION = "{version}"
 
 @dataclass(slots=True, frozen=True)
 class ModelPricing:
-    """Pricing information for a model (USD per 1M tokens)."""
+    """Pricing information for a model.
+
+    Token-based fields are USD per 1M tokens (chat / embedding /
+    reasoning). Modality-specific fields are USD per unit of the relevant
+    natural quantity: per image, per character, per second, per query.
+    All optional fields default to ``None`` and are populated only when
+    the manifest carries an explicit value — callers can introspect
+    ``pricing.<field> is None`` to decide whether the model supports a
+    given modality or cache tier.
+    """
 
     input_cost_per_million: float
     output_cost_per_million: float
-    # Optional: cached input price for prompt caching (None if not supported).
+    # Cached prompt-input rate (Anthropic prompt caching, OpenAI cached_tokens,
+    # Gemini context caching, DeepSeek cache hits). ``None`` when the model
+    # doesn't support caching.
     cached_input_cost_per_million: float | None = None
+    # Cache-write surcharge (Anthropic-family providers). ``None`` falls back
+    # to ``input_cost_per_million * 1.25`` for backwards compatibility with
+    # entries from before this field existed.
+    cache_creation_cost_per_million: float | None = None
+    # Per-million-reasoning-token rate for o-series and similar models that
+    # charge a premium on the thinking output. ``None`` means reasoning
+    # tokens are billed at the standard ``output_cost_per_million`` rate.
+    output_cost_per_reasoning_token: float | None = None
+    # Image generation: flat USD cost per image. Some providers tier by
+    # resolution / quality; the manifest entry should pick a representative
+    # rate (e.g. 1024x1024 standard) and document via a separate model id
+    # if multiple tiers are exposed.
+    image_per_request: float | None = None
+    # Audio TTS: USD per input character (text -> speech billing).
+    audio_per_character: float | None = None
+    # Audio STT: USD per second of audio (speech -> text billing).
+    audio_per_second: float | None = None
+    # Rerank: flat USD per query, regardless of document count.
+    rerank_per_query: float | None = None
 
 
 '''
@@ -317,6 +374,7 @@ def cost_per_token(
     *,
     cache_read_input_tokens: int = 0,
     cache_creation_input_tokens: int = 0,
+    reasoning_tokens: int = 0,
 ) -> tuple[float, float]:
     """Return ``(prompt_cost, completion_cost)`` in USD.
 
@@ -325,14 +383,22 @@ def cost_per_token(
 
     - ``cache_read_input_tokens``: billed at
       ``cached_input_cost_per_million`` (typically 10% of base).
-    - ``cache_creation_input_tokens``: billed at 1.25x the base input rate
-      (Anthropic's documented cache-write surcharge). Falls back to base
-      when the model has no cached pricing entry.
+    - ``cache_creation_input_tokens``: billed at
+      ``cache_creation_cost_per_million`` when the manifest specifies it
+      (varies by provider / TTL tier; Anthropic's standard 5-minute write
+      is 1.25x base, longer TTLs are 2x). Falls back to ``input_rate * 1.25``
+      for legacy entries that pre-date the manifest field.
     - The remainder (``prompt_tokens - cache_read - cache_creation``):
       billed at ``input_cost_per_million``.
 
-    Callers that don't track cache state simply omit the cache args; cost
-    falls back to the simple ``prompt_tokens * input_rate`` calculation.
+    Completion-side cost honors a separate reasoning-token rate when the
+    model exposes one (OpenAI o-series, DeepSeek-R1, etc.). Provider
+    responses report ``reasoning_tokens`` *within* ``completion_tokens``;
+    we subtract first to avoid double-billing.
+
+    Callers that don't track cache state or reasoning simply omit the
+    relevant args; the simple ``prompt_tokens * input_rate`` and
+    ``completion_tokens * output_rate`` calculations apply.
     """
     pricing = get_model_pricing(model)
     input_rate = pricing.input_cost_per_million
@@ -341,7 +407,11 @@ def cost_per_token(
         if pricing.cached_input_cost_per_million is not None
         else input_rate
     )
-    creation_rate = input_rate * 1.25  # Anthropic cache-write surcharge
+    creation_rate = (
+        pricing.cache_creation_cost_per_million
+        if pricing.cache_creation_cost_per_million is not None
+        else input_rate * 1.25  # Legacy Anthropic 5-minute write fallback
+    )
 
     base_prompt = max(
         0, prompt_tokens - cache_read_input_tokens - cache_creation_input_tokens
@@ -351,7 +421,18 @@ def cost_per_token(
         + (cache_read_input_tokens / 1_000_000) * cached_rate
         + (cache_creation_input_tokens / 1_000_000) * creation_rate
     )
-    completion_cost = (completion_tokens / 1_000_000) * pricing.output_cost_per_million
+
+    output_rate = pricing.output_cost_per_million
+    reasoning_rate = pricing.output_cost_per_reasoning_token
+    if reasoning_rate is not None and reasoning_tokens > 0:
+        non_reasoning = max(0, completion_tokens - reasoning_tokens)
+        completion_cost = (
+            (non_reasoning / 1_000_000) * output_rate
+            + (reasoning_tokens / 1_000_000) * reasoning_rate
+        )
+    else:
+        completion_cost = (completion_tokens / 1_000_000) * output_rate
+
     return (prompt_cost, completion_cost)
 
 
@@ -361,11 +442,22 @@ def completion_cost(
 ) -> float:
     """Return the total USD cost for ``response``.
 
-    ``model`` overrides ``response.model`` when given. Returns ``0.0`` when
-    ``response.usage`` is ``None`` (provider didn't report usage). When the
-    response carries cache token counts (Anthropic-family providers), they
-    are factored into the prompt-side cost at the cached rate.
+    Resolution order:
+
+    1. **Provider-reported cost** (``response.provider_reported_cost``) wins
+       when set. OpenRouter exposes USD cost in its ``x-openrouter-cost``
+       response header; the adapter lifts it into this field. Provider
+       truth beats our static table — even if the table has an entry for
+       the same model, the routed cost may differ (markup, routing fees).
+    2. **Static table lookup** otherwise: ``model`` overrides
+       ``response.model``; cache token counts and reasoning_tokens (read
+       from ``usage.completion_tokens_details``) are factored in.
+    3. **Zero** when ``response.usage is None`` (provider didn't report).
     """
+    provider_reported = getattr(response, "provider_reported_cost", None)
+    if provider_reported is not None:
+        return float(provider_reported)
+
     model_name = model or response.model
     if not model_name:
         raise ValueError("Model name required but not provided")
@@ -374,12 +466,18 @@ def completion_cost(
     if usage is None:
         return 0.0
 
+    reasoning_tokens = 0
+    details = usage.completion_tokens_details
+    if isinstance(details, dict):
+        reasoning_tokens = int(details.get("reasoning_tokens") or 0)
+
     prompt_cost, comp_cost = cost_per_token(
         model_name,
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         cache_read_input_tokens=usage.cache_read_input_tokens or 0,
         cache_creation_input_tokens=usage.cache_creation_input_tokens or 0,
+        reasoning_tokens=reasoning_tokens,
     )
     return prompt_cost + comp_cost
 '''

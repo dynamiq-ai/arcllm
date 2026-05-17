@@ -388,6 +388,12 @@ class ModelResponse(_DictLike, msgspec.Struct):
     # uses :class:`StreamChunk` for that, but accepting the kwarg keeps
     # litellm fixtures working unchanged.
     stream: bool = False
+    # Provider-reported USD cost for this call (e.g. OpenRouter's
+    # ``x-openrouter-cost`` response header). When set, takes precedence
+    # over arcllm's static-table cost calculation in
+    # :func:`arcllm.completion_cost` — provider truth beats local lookup.
+    # ``None`` for providers that don't expose cost natively.
+    provider_reported_cost: float | None = None
     # Extra fields for debugging/compatibility
     model_extra: dict[str, Any] = {}
 
@@ -511,7 +517,14 @@ class StreamingResponse:
     async iteration via __aiter__ when backed by async source.
     """
 
-    __slots__ = ("_chunks", "_iterator", "_model", "_response_id", "_usage")
+    __slots__ = (
+        "_chunks",
+        "_iterator",
+        "_model",
+        "_provider_reported_cost",
+        "_response_id",
+        "_usage",
+    )
 
     def __init__(
         self,
@@ -523,6 +536,7 @@ class StreamingResponse:
         self._response_id = response_id
         self._model = model
         self._usage: Usage | None = None
+        self._provider_reported_cost: float | None = None
         self._chunks: list[StreamChunk] = []
 
     def __iter__(self) -> Iterator[StreamChunk]:
@@ -536,6 +550,15 @@ class StreamingResponse:
     def usage(self) -> Usage | None:
         """Return usage if available (typically after iteration completes)."""
         return self._usage
+
+    @property
+    def provider_reported_cost(self) -> float | None:
+        """Provider-reported USD cost for this streaming call when the
+        adapter captured it (e.g. OpenRouter's ``x-openrouter-cost`` header
+        on the initial response). ``None`` for providers that don't expose
+        cost natively. Set by the adapter at response-header time, before
+        the iterator yields its first chunk."""
+        return self._provider_reported_cost
 
     @property
     def response_id(self) -> str:

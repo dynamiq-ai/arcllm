@@ -220,3 +220,221 @@ class TestPricingCoverage:
         """Test Mistral models have pricing."""
         pricing = get_model_pricing(model)
         assert pricing.input_cost_per_million >= 0
+
+
+class TestExtendedModelPricing:
+    """Pin the optional modality / cache-write / reasoning fields on ModelPricing."""
+
+    def test_cache_creation_cost_field(self):
+        p = ModelPricing(
+            input_cost_per_million=3.0,
+            output_cost_per_million=15.0,
+            cached_input_cost_per_million=0.3,
+            cache_creation_cost_per_million=3.75,
+        )
+        assert p.cache_creation_cost_per_million == 3.75
+
+    def test_output_cost_per_reasoning_token_field(self):
+        p = ModelPricing(
+            input_cost_per_million=1.0,
+            output_cost_per_million=2.0,
+            output_cost_per_reasoning_token=8.0,
+        )
+        assert p.output_cost_per_reasoning_token == 8.0
+
+    def test_image_per_request_field(self):
+        p = ModelPricing(
+            input_cost_per_million=0,
+            output_cost_per_million=0,
+            image_per_request=0.04,
+        )
+        assert p.image_per_request == 0.04
+
+    def test_audio_per_character_field(self):
+        p = ModelPricing(
+            input_cost_per_million=0,
+            output_cost_per_million=0,
+            audio_per_character=1.5e-05,
+        )
+        assert p.audio_per_character == 1.5e-05
+
+    def test_audio_per_second_field(self):
+        p = ModelPricing(
+            input_cost_per_million=0,
+            output_cost_per_million=0,
+            audio_per_second=1e-04,
+        )
+        assert p.audio_per_second == 1e-04
+
+    def test_rerank_per_query_field(self):
+        p = ModelPricing(
+            input_cost_per_million=0,
+            output_cost_per_million=0,
+            rerank_per_query=0.002,
+        )
+        assert p.rerank_per_query == 0.002
+
+
+class TestCostFormulaWithExtendedFields:
+    """The cost_per_token formula must honor the new optional fields."""
+
+    def test_reasoning_tokens_use_separate_rate_when_provided(self):
+        """If output_cost_per_reasoning_token is set, reasoning_tokens are
+        billed at that rate instead of the standard output rate. Real
+        provider responses (OpenAI o-series, DeepSeek-R1) include
+        reasoning_tokens *within* completion_tokens, so we subtract first
+        to avoid double-counting."""
+        # Construct a synthetic pricing entry by monkey-patching the
+        # lookup so the test doesn't depend on any specific real model.
+        from unittest.mock import patch
+
+        synthetic = ModelPricing(
+            input_cost_per_million=1.0,
+            output_cost_per_million=2.0,
+            output_cost_per_reasoning_token=8.0,
+        )
+        with patch("arcllm.pricing.tables.get_model_pricing", return_value=synthetic):
+            _prompt, completion = cost_per_token(
+                "synthetic/model",
+                prompt_tokens=1000,
+                completion_tokens=2500,
+                reasoning_tokens=2000,
+            )
+        # non-reasoning = 2500 - 2000 = 500 tokens at $2/M = 0.001
+        # reasoning = 2000 tokens at $8/M = 0.016
+        assert completion == pytest.approx(0.017, rel=1e-6)
+
+    def test_reasoning_tokens_ignored_when_rate_unset(self):
+        """If no reasoning rate is set, reasoning_tokens fall through to
+        the standard output rate (and shouldn't double-bill — completion
+        tokens already include them)."""
+        from unittest.mock import patch
+
+        synthetic = ModelPricing(
+            input_cost_per_million=1.0,
+            output_cost_per_million=2.0,
+            # output_cost_per_reasoning_token=None
+        )
+        with patch("arcllm.pricing.tables.get_model_pricing", return_value=synthetic):
+            _prompt, completion = cost_per_token(
+                "synthetic/model",
+                prompt_tokens=1000,
+                completion_tokens=500,
+                reasoning_tokens=200,
+            )
+        # All 500 tokens at $2/M = 0.001 (reasoning_tokens not surcharged)
+        assert completion == pytest.approx(0.001, rel=1e-6)
+
+    def test_cache_creation_uses_manifest_value_not_hardcoded_factor(self):
+        """When ``cache_creation_cost_per_million`` is set on the model,
+        cost_per_token must use it instead of the historical 1.25x
+        fallback. We pick a synthetic rate that's NOT 1.25x so the bug
+        would be detectable."""
+        from unittest.mock import patch
+
+        synthetic = ModelPricing(
+            input_cost_per_million=4.0,
+            output_cost_per_million=10.0,
+            cached_input_cost_per_million=0.4,
+            cache_creation_cost_per_million=6.0,  # 1.5x, not 1.25x
+        )
+        with patch("arcllm.pricing.tables.get_model_pricing", return_value=synthetic):
+            prompt, _ = cost_per_token(
+                "synthetic/model",
+                prompt_tokens=10000,
+                completion_tokens=0,
+                cache_creation_input_tokens=5000,
+            )
+        # base = 5000 at $4/M = 0.020
+        # creation = 5000 at $6/M = 0.030
+        # total = 0.050
+        assert prompt == pytest.approx(0.050, rel=1e-6)
+
+    def test_cache_creation_falls_back_to_1_25x_when_unset(self):
+        """Legacy entries without cache_creation_cost_per_million keep the
+        historical Anthropic 1.25x surcharge so old data stays correct."""
+        from unittest.mock import patch
+
+        synthetic = ModelPricing(
+            input_cost_per_million=4.0,
+            output_cost_per_million=10.0,
+            cached_input_cost_per_million=0.4,
+            # cache_creation_cost_per_million=None
+        )
+        with patch("arcllm.pricing.tables.get_model_pricing", return_value=synthetic):
+            prompt, _ = cost_per_token(
+                "synthetic/model",
+                prompt_tokens=10000,
+                completion_tokens=0,
+                cache_creation_input_tokens=5000,
+            )
+        # base = 5000 at $4/M = 0.020
+        # creation = 5000 at $4*1.25/M = $5/M = 0.025
+        # total = 0.045
+        assert prompt == pytest.approx(0.045, rel=1e-6)
+
+
+class TestCompletionCostExtractsReasoningTokens:
+    def test_completion_cost_passes_reasoning_tokens_through(self):
+        """completion_cost should read reasoning_tokens out of
+        usage.completion_tokens_details and pass them into cost_per_token
+        so the reasoning-rate path is exercised end-to-end."""
+        from unittest.mock import patch
+
+        synthetic = ModelPricing(
+            input_cost_per_million=1.0,
+            output_cost_per_million=2.0,
+            output_cost_per_reasoning_token=8.0,
+        )
+        response = ModelResponse(
+            id="x",
+            object="chat.completion",
+            created=0,
+            model="synthetic/model",
+            choices=[Choice(index=0, message=Message(role="assistant", content="hi"), finish_reason="stop")],
+            usage=Usage(
+                prompt_tokens=1000,
+                completion_tokens=2500,
+                total_tokens=3500,
+                completion_tokens_details={"reasoning_tokens": 2000},
+            ),
+        )
+        with patch("arcllm.pricing.tables.get_model_pricing", return_value=synthetic):
+            total = completion_cost(response)
+        # prompt = 1000 at $1/M = 0.001
+        # non-reasoning completion = 500 at $2/M = 0.001
+        # reasoning = 2000 at $8/M = 0.016
+        # total = 0.018
+        assert total == pytest.approx(0.018, rel=1e-6)
+
+
+class TestProviderReportedCostWins:
+    def test_completion_cost_prefers_provider_reported(self):
+        """When response.provider_reported_cost is set (e.g. via the
+        OpenRouter adapter from the x-openrouter-cost header), completion_cost
+        returns it directly without a table lookup. This sidesteps the
+        meta-router enumeration problem entirely."""
+        resp = ModelResponse(
+            id="x",
+            object="chat.completion",
+            created=0,
+            model="some-unknown-meta-router-model",
+            choices=[Choice(index=0, message=Message(role="assistant", content="hi"), finish_reason="stop")],
+            usage=Usage(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+            provider_reported_cost=0.00042,
+        )
+        assert completion_cost(resp) == pytest.approx(0.00042)
+
+    def test_completion_cost_falls_back_to_table_when_unset(self):
+        """Without provider_reported_cost, completion_cost computes from
+        the static table as before."""
+        resp = ModelResponse(
+            id="x",
+            object="chat.completion",
+            created=0,
+            model="openai/gpt-4o-mini",
+            choices=[Choice(index=0, message=Message(role="assistant", content="hi"), finish_reason="stop")],
+            usage=Usage(prompt_tokens=1_000_000, completion_tokens=0, total_tokens=1_000_000),
+        )
+        # gpt-4o-mini input is non-zero — confirm we get a positive table-derived value.
+        assert completion_cost(resp) > 0
