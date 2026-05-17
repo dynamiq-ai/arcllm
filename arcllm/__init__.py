@@ -136,6 +136,7 @@ __all__ = [
     "aimage_variation",
     "arerank",
     "completion",
+    "audio_cost",
     "completion_cost",
     "cost_per_token",
     "embedding",
@@ -143,11 +144,13 @@ __all__ = [
     "get_model_info",
     "get_model_pricing",
     "get_supported_openai_params",
+    "image_cost",
     "image_edit",
     "image_generation",
     "image_variation",
     "install_uvloop",
     "rerank",
+    "rerank_cost",
     "stream_chunk_builder",
     "supports_function_calling",
     "supports_pdf_input",
@@ -216,9 +219,12 @@ from arcllm.images import (
 
 # Pricing
 from arcllm.pricing import (
+    audio_cost,
     completion_cost,
     cost_per_token,
     get_model_pricing,
+    image_cost,
+    rerank_cost,
 )
 
 # Rerank surface

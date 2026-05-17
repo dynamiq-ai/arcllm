@@ -438,3 +438,69 @@ class TestProviderReportedCostWins:
         )
         # gpt-4o-mini input is non-zero — confirm we get a positive table-derived value.
         assert completion_cost(resp) > 0
+
+
+class TestModalityHelpers:
+    """Per-modality cost helpers built on top of get_model_pricing."""
+
+    def test_image_cost_per_request(self):
+        from arcllm.pricing import image_cost
+
+        # DALL-E 3 standard 1024x1024 = $0.04/image (per the manifest).
+        assert image_cost("openai/dall-e-3", n=1) == pytest.approx(0.04)
+        assert image_cost("openai/dall-e-3", n=3) == pytest.approx(0.12)
+
+    def test_image_cost_defaults_to_one_image(self):
+        from arcllm.pricing import image_cost
+
+        assert image_cost("openai/dall-e-3") == pytest.approx(0.04)
+
+    def test_image_cost_unknown_model_raises(self):
+        from arcllm.pricing import image_cost
+        from arcllm.pricing.tables import UnknownModelPricingError
+
+        with pytest.raises(UnknownModelPricingError):
+            image_cost("openai/gpt-4o-mini")  # chat model, no image pricing
+
+    def test_audio_speech_cost_per_character(self):
+        from arcllm.pricing import audio_cost
+
+        # TTS-1 = $15/1M chars → $0.015 per 1k chars.
+        assert audio_cost("openai/tts-1", characters=1000) == pytest.approx(0.015)
+        assert audio_cost("openai/tts-1-hd", characters=1000) == pytest.approx(0.030)
+
+    def test_audio_transcription_cost_per_second(self):
+        from arcllm.pricing import audio_cost
+
+        # Whisper-1 = $0.006/min = $0.0001/sec → 600 sec = $0.06.
+        assert audio_cost("openai/whisper-1", seconds=600) == pytest.approx(0.06)
+
+    def test_audio_cost_requires_unit_kwarg(self):
+        from arcllm.pricing import audio_cost
+        from arcllm.pricing.tables import UnknownModelPricingError
+
+        with pytest.raises(UnknownModelPricingError):
+            # No characters/seconds passed — can't determine billing.
+            audio_cost("openai/tts-1")
+
+    def test_audio_cost_wrong_unit_for_modality_raises(self):
+        from arcllm.pricing import audio_cost
+        from arcllm.pricing.tables import UnknownModelPricingError
+
+        with pytest.raises(UnknownModelPricingError):
+            # TTS is per-character, not per-second.
+            audio_cost("openai/tts-1", seconds=10)
+        with pytest.raises(UnknownModelPricingError):
+            # Whisper is per-second, not per-character.
+            audio_cost("openai/whisper-1", characters=100)
+
+    def test_rerank_cost_per_query(self):
+        from arcllm.pricing import rerank_cost
+
+        # rerank-v3.5 = $2 per 1000 queries → 5 queries = $0.01.
+        assert rerank_cost("cohere/rerank-v3.5", queries=5) == pytest.approx(0.01)
+
+    def test_rerank_cost_defaults_to_one_query(self):
+        from arcllm.pricing import rerank_cost
+
+        assert rerank_cost("cohere/rerank-v3.5") == pytest.approx(0.002)
