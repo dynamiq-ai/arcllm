@@ -391,7 +391,11 @@ class TestCompletionCostExtractsReasoningTokens:
             object="chat.completion",
             created=0,
             model="synthetic/model",
-            choices=[Choice(index=0, message=Message(role="assistant", content="hi"), finish_reason="stop")],
+            choices=[
+                Choice(
+                    index=0, message=Message(role="assistant", content="hi"), finish_reason="stop"
+                )
+            ],
             usage=Usage(
                 prompt_tokens=1000,
                 completion_tokens=2500,
@@ -419,7 +423,11 @@ class TestProviderReportedCostWins:
             object="chat.completion",
             created=0,
             model="some-unknown-meta-router-model",
-            choices=[Choice(index=0, message=Message(role="assistant", content="hi"), finish_reason="stop")],
+            choices=[
+                Choice(
+                    index=0, message=Message(role="assistant", content="hi"), finish_reason="stop"
+                )
+            ],
             usage=Usage(prompt_tokens=100, completion_tokens=50, total_tokens=150),
             provider_reported_cost=0.00042,
         )
@@ -433,7 +441,11 @@ class TestProviderReportedCostWins:
             object="chat.completion",
             created=0,
             model="openai/gpt-4o-mini",
-            choices=[Choice(index=0, message=Message(role="assistant", content="hi"), finish_reason="stop")],
+            choices=[
+                Choice(
+                    index=0, message=Message(role="assistant", content="hi"), finish_reason="stop"
+                )
+            ],
             usage=Usage(prompt_tokens=1_000_000, completion_tokens=0, total_tokens=1_000_000),
         )
         # gpt-4o-mini input is non-zero — confirm we get a positive table-derived value.

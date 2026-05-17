@@ -155,7 +155,6 @@ class DatabricksAdapter(OpenAIAdapter):
             timeout=self.config.timeout,
         )
 
-
     def _extract_cache_tokens(
         self,
         usage_data: dict[str, Any],

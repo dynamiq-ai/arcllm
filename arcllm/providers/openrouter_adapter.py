@@ -18,6 +18,7 @@ API Documentation:
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -80,9 +81,9 @@ class OpenRouterAdapter(OpenAIAdapter):
 
     def post_process_response(
         self,
-        response: "ModelResponse",
+        response: ModelResponse,
         headers: dict[str, str],
-    ) -> "ModelResponse":
+    ) -> ModelResponse:
         """Lift OpenRouter's ``x-openrouter-cost`` response header (USD
         float string) onto :attr:`ModelResponse.provider_reported_cost`.
 
@@ -97,10 +98,8 @@ class OpenRouterAdapter(OpenAIAdapter):
         """
         for key, value in headers.items():
             if key.lower() == "x-openrouter-cost":
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     response.provider_reported_cost = float(value)
-                except (TypeError, ValueError):
-                    pass
                 break
         return response
 
