@@ -254,6 +254,21 @@ class Adapter(Protocol):
         """
         ...
 
+    def post_process_response(
+        self,
+        response: ModelResponse,
+        headers: dict[str, str],
+    ) -> ModelResponse:
+        """Inspect response headers and decorate the parsed ``response``.
+
+        Default: no-op. Subclasses override to lift provider-native
+        fields that arrive only as headers (e.g. OpenRouter's
+        ``x-openrouter-cost``) onto the response struct. Called by core
+        immediately after :meth:`parse_response`. The returned response
+        is what's handed back to the caller.
+        """
+        return response
+
     def parse_stream_event(self, data: str, model: str) -> StreamChunk | None:
         """
         Parse a single SSE event data into StreamChunk.
@@ -545,6 +560,21 @@ class BaseAdapter(ABC):
     def parse_response(self, data: bytes, model: str) -> ModelResponse:
         """Parse response - must be implemented by subclass."""
         ...
+
+    def post_process_response(
+        self,
+        response: ModelResponse,
+        headers: dict[str, str],
+    ) -> ModelResponse:
+        """Inspect response headers and decorate the parsed ``response``.
+
+        Default: no-op. Subclasses override to lift provider-native fields
+        that arrive only as headers (e.g. OpenRouter's
+        ``x-openrouter-cost`` USD value) onto the response struct. Called
+        by core immediately after :meth:`parse_response`. The returned
+        response is what's handed back to the caller.
+        """
+        return response
 
     @abstractmethod
     def parse_stream_event(self, data: str, model: str) -> StreamChunk | None:

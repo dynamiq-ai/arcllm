@@ -292,7 +292,8 @@ def _sync_completion(
     if result.status_code >= 400:
         raise adapter.parse_error(result.status_code, result.body, result.request_id)
 
-    return adapter.parse_response(result.body, model_id)
+    response = adapter.parse_response(result.body, model_id)
+    return adapter.post_process_response(response, result.headers)
 
 
 def _stream_completion(
@@ -401,7 +402,8 @@ async def _async_completion(
     if result.status_code >= 400:
         raise adapter.parse_error(result.status_code, result.body, result.request_id)
 
-    return adapter.parse_response(result.body, model_id)
+    response = adapter.parse_response(result.body, model_id)
+    return adapter.post_process_response(response, result.headers)
 
 
 async def _astream_completion(

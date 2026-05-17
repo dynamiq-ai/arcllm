@@ -446,3 +446,123 @@ class TestGeminiCacheTokenExtraction:
         resp = adapter.parse_response(body, model="gemini-2.5-pro")
         assert resp.usage is not None
         assert resp.usage.cache_read_input_tokens is None
+
+
+class TestOpenRouterCostCapture:
+    """OpenRouter returns the actual billed USD cost in the
+    ``x-openrouter-cost`` response header — authoritative across the
+    routed provider's markup. The adapter lifts it into
+    ``ModelResponse.provider_reported_cost`` so ``completion_cost()``
+    returns it directly without a static-table lookup."""
+
+    @pytest.fixture
+    def adapter(self):
+        from arcllm.providers.openrouter_adapter import OpenRouterAdapter
+
+        return OpenRouterAdapter(ProviderConfig(api_key="test"))
+
+    @pytest.fixture
+    def body(self):
+        return json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "openai/gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "hi"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "total_tokens": 150,
+                },
+            }
+        ).encode("utf-8")
+
+    def test_x_openrouter_cost_lifted_to_provider_reported_cost(self, adapter, body):
+        resp = adapter.parse_response(body, model="openai/gpt-4o-mini")
+        # Standard parse: no headers visible. post_process_response lifts
+        # the header.
+        resp = adapter.post_process_response(resp, {"x-openrouter-cost": "0.00042"})
+        assert resp.provider_reported_cost == pytest.approx(0.00042)
+
+    def test_post_process_response_handles_mixed_case_header(self, adapter, body):
+        """httpx and some servers preserve original header casing in the
+        dict; the adapter must do case-insensitive lookup."""
+        resp = adapter.parse_response(body, model="openai/gpt-4o-mini")
+        resp = adapter.post_process_response(resp, {"X-OpenRouter-Cost": "0.00100"})
+        assert resp.provider_reported_cost == pytest.approx(0.00100)
+
+    def test_post_process_response_no_cost_header_keeps_none(self, adapter, body):
+        """Without the header, provider_reported_cost stays None and
+        completion_cost falls back to the static table."""
+        resp = adapter.parse_response(body, model="openai/gpt-4o-mini")
+        resp = adapter.post_process_response(resp, {"content-type": "application/json"})
+        assert resp.provider_reported_cost is None
+
+    def test_post_process_response_ignores_malformed_cost(self, adapter, body):
+        """Malformed header value (non-numeric) is swallowed — falling
+        back to None so the static table takes over rather than crashing."""
+        resp = adapter.parse_response(body, model="openai/gpt-4o-mini")
+        resp = adapter.post_process_response(resp, {"x-openrouter-cost": "not-a-number"})
+        assert resp.provider_reported_cost is None
+
+
+class TestCorePostProcessHook:
+    """Core's completion() path must invoke adapter.post_process_response
+    so adapter-side header lifts (e.g. OpenRouter cost) take effect."""
+
+    def test_completion_threads_response_headers_to_post_process(self):
+        """End-to-end: mock the HTTP layer to return a response with
+        the OpenRouter cost header set; verify the returned
+        ModelResponse.provider_reported_cost reflects it."""
+        from unittest.mock import patch
+
+        from arcllm import completion
+        from arcllm.http.client import HTTPResponse
+
+        body = json.dumps(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "openai/gpt-4o-mini",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        ).encode("utf-8")
+        http_response = HTTPResponse(
+            status_code=200,
+            headers={"x-openrouter-cost": "0.00025"},
+            body=body,
+        )
+
+        class _FakeClient:
+            def request(self, method, url, *, headers, body, timeout, stream):
+                return http_response
+
+        with (
+            patch.dict("os.environ", {"OPENROUTER_API_KEY": "test"}),
+            patch("arcllm.core._get_http_client", return_value=_FakeClient()),
+        ):
+            resp = completion(
+                model="openrouter/openai/gpt-4o-mini",
+                messages=[{"role": "user", "content": "hi"}],
+            )
+
+        assert resp.provider_reported_cost == pytest.approx(0.00025)

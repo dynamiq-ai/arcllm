@@ -30,7 +30,7 @@ from arcllm.providers.base import (
 from arcllm.providers.openai_adapter import OpenAIAdapter
 
 if TYPE_CHECKING:
-    from arcllm.types import EmbeddingResponse
+    from arcllm.types import EmbeddingResponse, ModelResponse
 
 __all__ = ["OpenRouterAdapter"]
 
@@ -77,6 +77,32 @@ class OpenRouterAdapter(OpenAIAdapter):
             "OpenRouter does not provide an embeddings API",
             provider=self.provider_name,
         )
+
+    def post_process_response(
+        self,
+        response: "ModelResponse",
+        headers: dict[str, str],
+    ) -> "ModelResponse":
+        """Lift OpenRouter's ``x-openrouter-cost`` response header (USD
+        float string) onto :attr:`ModelResponse.provider_reported_cost`.
+
+        This is the authoritative cost for the call — accounts for the
+        routed provider's price plus OpenRouter's markup, which a static
+        per-model table can't represent honestly. ``completion_cost()``
+        prefers this value over any table lookup.
+
+        Header lookup is case-insensitive (httpx normalizes to lower but
+        some intermediaries don't). Malformed values are swallowed so the
+        caller falls back to the static table instead of crashing.
+        """
+        for key, value in headers.items():
+            if key.lower() == "x-openrouter-cost":
+                try:
+                    response.provider_reported_cost = float(value)
+                except (TypeError, ValueError):
+                    pass
+                break
+        return response
 
 
 register_provider("openrouter", OpenRouterAdapter)
